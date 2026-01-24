@@ -267,39 +267,54 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
 fn setup_uefi_boot(paths: &IsoPaths) -> Result<()> {
     println!("Setting up UEFI boot...");
 
-    // Try to find EFI files from rootfs or create minimal setup
-    let grub_efi = paths.rootfs.join("usr/lib/grub/x86_64-efi");
-
-    if !grub_efi.exists() {
-        bail!(
-            "GRUB EFI files not found at {}.\n\
-             The rootfs may need 'grub-efi' package.",
-            grub_efi.display()
-        );
-    }
-
-    // Create GRUB standalone image
-    println!("  Creating GRUB EFI bootloader...");
     let efi_bootloader_path = paths.iso_root.join(ISO_EFI_DIR).join(EFI_BOOTLOADER);
 
-    // Create a minimal grub.cfg for embedding
-    let embedded_cfg = "configfile /EFI/BOOT/grub.cfg\n";
-    let embedded_cfg_path = paths.output_dir.join("grub-embed.cfg");
-    fs::write(&embedded_cfg_path, embedded_cfg)?;
+    // Try to copy EFI bootloader from Alpine ISO contents first
+    let iso_contents = paths.output_dir.parent().unwrap().join("downloads/iso-contents");
+    let alpine_efi = iso_contents.join("efi/boot/bootx64.efi");
 
-    // Create standalone GRUB EFI
-    Cmd::new("grub-mkstandalone")
-        .args(["--format=x86_64-efi"])
-        .args(["--output"])
-        .arg_path(&efi_bootloader_path)
-        .args(["--locales="])
-        .args(["--fonts="])
-        .arg(format!("boot/grub/grub.cfg={}", embedded_cfg_path.display()))
-        .error_msg("grub-mkstandalone failed. Install: sudo dnf install grub2-tools-extra")
-        .run()?;
+    if alpine_efi.exists() {
+        println!("  Copying EFI bootloader from Alpine ISO...");
+        fs::copy(&alpine_efi, &efi_bootloader_path)?;
+    } else {
+        // Fallback: try to use grub-mkstandalone (grub2-mkstandalone on Fedora)
+        println!("  Creating GRUB EFI bootloader...");
 
-    // Create GRUB config
+        // Create a minimal grub.cfg for embedding
+        let embedded_cfg = "configfile /EFI/BOOT/grub.cfg\n";
+        let embedded_cfg_path = paths.output_dir.join("grub-embed.cfg");
+        fs::write(&embedded_cfg_path, embedded_cfg)?;
+
+        // Try grub2-mkstandalone (Fedora) first, then grub-mkstandalone (Debian/Ubuntu)
+        let grub_cmd = if std::process::Command::new("grub2-mkstandalone")
+            .arg("--version")
+            .output()
+            .is_ok()
+        {
+            "grub2-mkstandalone"
+        } else {
+            "grub-mkstandalone"
+        };
+
+        Cmd::new(grub_cmd)
+            .args(["--format=x86_64-efi"])
+            .args(["--output"])
+            .arg_path(&efi_bootloader_path)
+            .args(["--locales="])
+            .args(["--fonts="])
+            .arg(format!("boot/grub/grub.cfg={}", embedded_cfg_path.display()))
+            .error_msg("grub-mkstandalone failed. Install: sudo dnf install grub2-tools-extra")
+            .run()?;
+    }
+
+    // Create GRUB config - Alpine's bootloader looks for /boot/grub/grub.cfg
+    // Key options:
+    // - modules=: Tell Alpine init which kernel modules to load (like Alpine's original)
+    // - root=LABEL=XXX: Passed to init script for finding boot device
+    // Note: Alpine GRUB uses `linux`/`initrd`, not `linuxefi`/`initrdefi`
     let label = iso_label();
+    // Modules needed for live boot (match Alpine's approach)
+    let modules = "modules=loop,squashfs,overlay,virtio_pci,virtio_blk,virtio_scsi,sd-mod,sr-mod,cdrom,isofs";
     let grub_cfg = format!(
         r#"# Serial console for automated testing
 serial --speed=115200 --unit=0 --word=8 --parity=no --stop=1
@@ -310,25 +325,32 @@ set default=0
 set timeout=5
 
 menuentry '{}' {{
-    linux /{} root=LABEL={} {} {}
+    linux /{} {} root=LABEL={} {} {}
     initrd /{}
 }}
 
 menuentry '{} (Emergency Shell)' {{
-    linux /{} root=LABEL={} {} {} emergency
+    linux /{} {} root=LABEL={} {} {} emergency
     initrd /{}
 }}
 
 menuentry '{} (Debug)' {{
-    linux /{} root=LABEL={} {} {} debug
+    linux /{} {} root=LABEL={} {} {} debug
     initrd /{}
 }}
 "#,
-        OS_NAME, KERNEL_ISO_PATH, label, SERIAL_CONSOLE, VGA_CONSOLE, INITRAMFS_LIVE_ISO_PATH,
-        OS_NAME, KERNEL_ISO_PATH, label, SERIAL_CONSOLE, VGA_CONSOLE, INITRAMFS_LIVE_ISO_PATH,
-        OS_NAME, KERNEL_ISO_PATH, label, SERIAL_CONSOLE, VGA_CONSOLE, INITRAMFS_LIVE_ISO_PATH,
+        OS_NAME, KERNEL_ISO_PATH, modules, label, SERIAL_CONSOLE, VGA_CONSOLE, INITRAMFS_LIVE_ISO_PATH,
+        OS_NAME, KERNEL_ISO_PATH, modules, label, SERIAL_CONSOLE, VGA_CONSOLE, INITRAMFS_LIVE_ISO_PATH,
+        OS_NAME, KERNEL_ISO_PATH, modules, label, SERIAL_CONSOLE, VGA_CONSOLE, INITRAMFS_LIVE_ISO_PATH,
     );
-    fs::write(paths.iso_root.join(ISO_EFI_DIR).join("grub.cfg"), grub_cfg)?;
+
+    // Write to both locations for compatibility:
+    // - /boot/grub/grub.cfg (where Alpine's bootloader looks)
+    // - /EFI/BOOT/grub.cfg (standard EFI location)
+    let boot_grub = paths.iso_root.join("boot/grub");
+    fs::create_dir_all(&boot_grub)?;
+    fs::write(boot_grub.join("grub.cfg"), &grub_cfg)?;
+    fs::write(paths.iso_root.join(ISO_EFI_DIR).join("grub.cfg"), &grub_cfg)?;
 
     // Create EFI boot image
     let efiboot_img = paths.output_dir.join(EFIBOOT_FILENAME);

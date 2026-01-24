@@ -68,8 +68,15 @@ enum Commands {
     /// Rebuild only the ISO (requires squashfs and initramfs)
     Iso,
 
-    /// Run the ISO in QEMU
+    /// Run the ISO in QEMU (GUI)
     Run,
+
+    /// Test the ISO boots correctly (headless, automated)
+    Test {
+        /// Timeout in seconds (default: 120)
+        #[arg(short, long, default_value = "120")]
+        timeout: u64,
+    },
 
     /// Download Alpine Extended ISO and apk-tools
     Download,
@@ -98,6 +105,7 @@ fn main() {
         Commands::Initramfs => cmd_initramfs(),
         Commands::Iso => cmd_iso(),
         Commands::Run => cmd_run(),
+        Commands::Test { timeout } => cmd_test(timeout),
         Commands::Download => cmd_download(),
         Commands::Extract => cmd_extract(),
         Commands::Status => cmd_status(),
@@ -220,6 +228,11 @@ fn cmd_iso() -> Result<()> {
 fn cmd_run() -> Result<()> {
     let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     acornos::qemu::run_iso(&base_dir, None)
+}
+
+fn cmd_test(timeout: u64) -> Result<()> {
+    let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    acornos::qemu::test_iso(&base_dir, timeout)
 }
 
 fn cmd_download() -> Result<()> {

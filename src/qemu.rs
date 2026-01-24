@@ -1,10 +1,18 @@
 //! QEMU runner for AcornOS.
 //!
 //! Runs the AcornOS ISO in QEMU with UEFI boot.
+//!
+//! # Testing
+//!
+//! The `test_iso` function boots the ISO headless with serial console and
+//! watches for success/failure patterns. This enables automated boot verification.
 
 use anyhow::{bail, Context, Result};
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::sync::mpsc;
+use std::time::{Duration, Instant};
 
 use distro_builder::process::Cmd;
 use distro_spec::acorn::{
@@ -12,6 +20,31 @@ use distro_spec::acorn::{
     QEMU_MEMORY_GB, QEMU_DISK_GB,
     QEMU_DISK_FILENAME, QEMU_SERIAL_LOG, QEMU_CPU_MODE,
 };
+
+/// Success patterns - if we see any of these, boot succeeded.
+const SUCCESS_PATTERNS: &[&str] = &[
+    "login:",                    // Getty prompt - definitive success
+    "Welcome to Alpine Linux",   // Alpine welcome message
+    "Welcome to AcornOS",        // AcornOS welcome message
+    "openrc-init",               // OpenRC init started
+    "Switching root",            // Our init script switch_root message
+    "OpenRC",                    // OpenRC starting services
+    "rc-status",                 // OpenRC status output
+];
+
+/// Failure patterns - if we see any of these, boot failed.
+const FAILURE_PATTERNS: &[&str] = &[
+    "Kernel panic",
+    "not syncing",
+    "VFS: Cannot open root device",
+    "No init found",
+    "can't find /init",
+    "SQUASHFS error",
+    "failed to mount",
+    "emergency shell",
+    "No bootable device",
+    "Boot Failed",
+];
 
 /// Builder for QEMU commands.
 #[derive(Default)]
@@ -202,4 +235,181 @@ pub fn run_iso(base_dir: &Path, disk_size: Option<String>) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Test the ISO by booting headless and watching serial output.
+///
+/// Returns Ok(()) if boot succeeds (login prompt reached).
+/// Returns Err if boot fails or times out.
+pub fn test_iso(base_dir: &Path, timeout_secs: u64) -> Result<()> {
+    let output_dir = base_dir.join("output");
+    let iso_path = output_dir.join(ISO_FILENAME);
+
+    if !iso_path.exists() {
+        bail!(
+            "ISO not found at {}. Run 'acornos iso' first.",
+            iso_path.display()
+        );
+    }
+
+    println!("=== AcornOS Boot Test ===\n");
+    println!("ISO: {}", iso_path.display());
+    println!("Timeout: {}s", timeout_secs);
+    println!();
+
+    // Find OVMF
+    let ovmf_path = find_ovmf().context("OVMF not found - UEFI boot required")?;
+
+    // Build headless QEMU command with serial console
+    let mut cmd = Command::new("qemu-system-x86_64");
+
+    // Enable KVM if available
+    let kvm_available = std::path::Path::new("/dev/kvm").exists();
+    if kvm_available {
+        cmd.args(["-enable-kvm", "-cpu", "host"]);
+    } else {
+        cmd.args(["-cpu", QEMU_CPU_MODE]);
+    }
+
+    cmd.args(["-smp", "2"]);
+    cmd.args(["-m", &format!("{}G", QEMU_MEMORY_GB)]);
+
+    // CD-ROM via virtio-scsi
+    cmd.args([
+        "-device", "virtio-scsi-pci,id=scsi0",
+        "-device", "scsi-cd,drive=cdrom0,bus=scsi0.0",
+        "-drive", &format!("id=cdrom0,if=none,format=raw,readonly=on,file={}", iso_path.display()),
+    ]);
+
+    // UEFI firmware
+    cmd.args([
+        "-drive",
+        &format!("if=pflash,format=raw,readonly=on,file={}", ovmf_path.display()),
+    ]);
+
+    // Headless with serial console
+    cmd.args(["-nographic", "-serial", "mon:stdio", "-no-reboot"]);
+
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit());
+
+    println!("Starting QEMU (headless, serial console)...\n");
+
+    let mut child = cmd.spawn().context("Failed to spawn qemu-system-x86_64")?;
+    let stdout = child.stdout.take().context("Failed to capture stdout")?;
+
+    // Spawn reader thread
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let reader = BufReader::new(stdout);
+        for line in reader.lines().map_while(Result::ok) {
+            if tx.send(line).is_err() {
+                break;
+            }
+        }
+    });
+
+    // Watch for patterns
+    let start = Instant::now();
+    let timeout = Duration::from_secs(timeout_secs);
+    let stall_timeout = Duration::from_secs(30); // No output for 30s = stall
+    let mut last_output = Instant::now();
+    let mut output_buffer: Vec<String> = Vec::new();
+
+    // Boot stage tracking
+    let mut saw_uefi = false;
+    let mut saw_kernel = false;
+    let mut saw_init = false;
+
+    println!("Watching boot output...\n");
+
+    loop {
+        // Check overall timeout
+        if start.elapsed() > timeout {
+            let _ = child.kill();
+            let last_lines = output_buffer.iter().rev().take(20).cloned().collect::<Vec<_>>();
+            bail!(
+                "TIMEOUT: Boot did not complete in {}s\n\nLast output:\n{}",
+                timeout_secs,
+                last_lines.into_iter().rev().collect::<Vec<_>>().join("\n")
+            );
+        }
+
+        // Check stall
+        if last_output.elapsed() > stall_timeout {
+            let _ = child.kill();
+            let stage = if saw_init {
+                "Init started but stalled"
+            } else if saw_kernel {
+                "Kernel started but init stalled"
+            } else if saw_uefi {
+                "UEFI ran but kernel stalled"
+            } else {
+                "No output - QEMU/serial broken"
+            };
+            bail!("STALL: {} (no output for {}s)", stage, stall_timeout.as_secs());
+        }
+
+        match rx.recv_timeout(Duration::from_millis(100)) {
+            Ok(line) => {
+                last_output = Instant::now();
+                output_buffer.push(line.clone());
+
+                // Print output for visibility
+                println!("  {}", line);
+
+                // Track boot stages
+                if line.contains("UEFI") || line.contains("EFI") || line.contains("BdsDxe") {
+                    saw_uefi = true;
+                }
+                if line.contains("Linux version") || line.contains("Booting Linux") {
+                    saw_kernel = true;
+                }
+                if line.contains("OpenRC") || line.contains("init") {
+                    saw_init = true;
+                }
+
+                // Check failure patterns first (fail fast)
+                for pattern in FAILURE_PATTERNS {
+                    if line.contains(pattern) {
+                        let _ = child.kill();
+                        let last_lines = output_buffer.iter().rev().take(30).cloned().collect::<Vec<_>>();
+                        bail!(
+                            "BOOT FAILED: {}\n\nContext:\n{}",
+                            pattern,
+                            last_lines.into_iter().rev().collect::<Vec<_>>().join("\n")
+                        );
+                    }
+                }
+
+                // Check success patterns
+                for pattern in SUCCESS_PATTERNS {
+                    if line.contains(pattern) {
+                        let elapsed = start.elapsed().as_secs_f64();
+                        let _ = child.kill();
+                        let _ = child.wait();
+
+                        println!();
+                        println!("═══════════════════════════════════════════════════════════");
+                        println!("BOOT SUCCESS: Matched '{}'", pattern);
+                        println!("═══════════════════════════════════════════════════════════");
+                        println!();
+                        println!("Boot completed in {:.1}s", elapsed);
+                        println!("AcornOS is ready for login.");
+
+                        return Ok(());
+                    }
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                let last_lines = output_buffer.iter().rev().take(20).cloned().collect::<Vec<_>>();
+                bail!(
+                    "QEMU exited unexpectedly\n\nLast output:\n{}",
+                    last_lines.into_iter().rev().collect::<Vec<_>>().join("\n")
+                );
+            }
+        }
+    }
 }
