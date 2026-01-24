@@ -8,6 +8,12 @@
 //! # Show current status
 //! acornos status
 //!
+//! # Download Alpine Extended ISO (~1GB)
+//! acornos download
+//!
+//! # Extract ISO and create rootfs
+//! acornos extract
+//!
 //! # Build complete ISO (not yet implemented)
 //! acornos build
 //!
@@ -24,12 +30,12 @@
 //! | libc | glibc | musl |
 //! | Coreutils | GNU | busybox |
 //! | Shell | bash | ash (busybox) |
-//!
-//! # Status
-//!
-//! **SKELETON** - Commands are not yet implemented.
 
+mod extract;
+
+use anyhow::Result;
 use clap::{Parser, Subcommand};
+use std::path::PathBuf;
 
 #[derive(Parser)]
 #[command(name = "acornos")]
@@ -53,10 +59,10 @@ enum Commands {
     /// Run the ISO in QEMU
     Run,
 
-    /// Download Alpine packages
+    /// Download Alpine Extended ISO and apk-tools
     Download,
 
-    /// Extract Alpine packages to rootfs
+    /// Extract Alpine ISO and create rootfs
     Extract,
 
     /// Show build status and next steps
@@ -82,12 +88,12 @@ fn main() {
     }
 }
 
-fn cmd_build() -> anyhow::Result<()> {
+fn cmd_build() -> Result<()> {
     unimplemented!(
         "AcornOS build not yet implemented.\n\
         \n\
         This requires:\n\
-        - Alpine APK extraction\n\
+        - Alpine APK extraction (DONE - use 'acornos extract')\n\
         - OpenRC service setup\n\
         - Component definitions\n\
         \n\
@@ -95,7 +101,7 @@ fn cmd_build() -> anyhow::Result<()> {
     )
 }
 
-fn cmd_initramfs() -> anyhow::Result<()> {
+fn cmd_initramfs() -> Result<()> {
     unimplemented!(
         "AcornOS initramfs not yet implemented.\n\
         \n\
@@ -106,7 +112,7 @@ fn cmd_initramfs() -> anyhow::Result<()> {
     )
 }
 
-fn cmd_iso() -> anyhow::Result<()> {
+fn cmd_iso() -> Result<()> {
     unimplemented!(
         "AcornOS ISO not yet implemented.\n\
         \n\
@@ -117,7 +123,7 @@ fn cmd_iso() -> anyhow::Result<()> {
     )
 }
 
-fn cmd_run() -> anyhow::Result<()> {
+fn cmd_run() -> Result<()> {
     unimplemented!(
         "AcornOS QEMU runner not yet implemented.\n\
         \n\
@@ -127,33 +133,26 @@ fn cmd_run() -> anyhow::Result<()> {
     )
 }
 
-fn cmd_download() -> anyhow::Result<()> {
-    unimplemented!(
-        "Alpine package download not yet implemented.\n\
-        \n\
-        This requires:\n\
-        - Alpine repository access\n\
-        - Package list definition\n\
-        - Download caching"
-    )
+fn cmd_download() -> Result<()> {
+    let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+
+    // Create tokio runtime for async download
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(extract::cmd_download_impl(&base_dir))
 }
 
-fn cmd_extract() -> anyhow::Result<()> {
-    unimplemented!(
-        "Alpine package extraction not yet implemented.\n\
-        \n\
-        Options:\n\
-        1. Use apk-tools binary (requires Alpine or apk-tools-static)\n\
-        2. Implement APK format parsing in Rust\n\
-        3. Use Alpine minirootfs as starting point"
-    )
+fn cmd_extract() -> Result<()> {
+    let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    extract::cmd_extract_impl(&base_dir)
 }
 
-fn cmd_status() -> anyhow::Result<()> {
+fn cmd_status() -> Result<()> {
     use acornos::config::AcornConfig;
     use distro_builder::DistroConfig;
 
     let config = AcornConfig;
+    let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let paths = extract::ExtractPaths::new(&base_dir);
 
     println!("AcornOS Builder Status");
     println!("======================");
@@ -165,18 +164,44 @@ fn cmd_status() -> anyhow::Result<()> {
     println!("  Init System: {}", config.init_system());
     println!("  Shell:       {}", config.default_shell());
     println!();
-    println!("Status: SKELETON - Not yet implemented");
+
+    println!("Downloads:");
+    if paths.iso.exists() {
+        println!("  Alpine ISO:      FOUND at {}", paths.iso.display());
+    } else {
+        println!("  Alpine ISO:      NOT FOUND (run 'acornos download')");
+    }
+
+    let apk_static = paths.apk_tools.join("sbin").join("apk.static");
+    if apk_static.exists() {
+        println!("  apk-tools:       FOUND at {}", apk_static.display());
+    } else {
+        println!("  apk-tools:       NOT FOUND (run 'acornos download')");
+    }
     println!();
-    println!("AcornOS is a sibling distribution to LevitateOS:");
-    println!("  - Alpine Linux base (musl, busybox)");
-    println!("  - OpenRC init system");
-    println!("  - Daily driver desktop (NOT minimal)");
+
+    println!("Extraction:");
+    if paths.iso_contents.exists() && paths.iso_contents.join("apks").exists() {
+        println!("  ISO contents:    EXTRACTED at {}", paths.iso_contents.display());
+    } else {
+        println!("  ISO contents:    NOT EXTRACTED (run 'acornos extract')");
+    }
+
+    if paths.rootfs.exists() && paths.rootfs.join("bin").exists() {
+        println!("  Rootfs:          CREATED at {}", paths.rootfs.display());
+    } else {
+        println!("  Rootfs:          NOT CREATED (run 'acornos extract')");
+    }
     println!();
+
     println!("Next steps:");
-    println!("  1. Implement Alpine APK extraction");
-    println!("  2. Create OpenRC service components");
-    println!("  3. Build initramfs with mdev");
-    println!("  4. Create bootable ISO");
+    if !paths.iso.exists() {
+        println!("  1. Run 'acornos download' to download Alpine Extended ISO");
+    } else if !paths.rootfs.exists() {
+        println!("  1. Run 'acornos extract' to extract ISO and create rootfs");
+    } else {
+        println!("  1. Rootfs ready! Build/initramfs/ISO commands not yet implemented.");
+    }
 
     Ok(())
 }
