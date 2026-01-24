@@ -6,19 +6,16 @@
 //! - **musl** C library
 //! - **busybox** coreutils
 //!
-//! # Status
-//!
-//! This library is a **structural skeleton**. Most functionality
-//! is not yet implemented.
-//!
 //! # Architecture
 //!
 //! ```text
 //! AcornOS (this crate)
 //!     │
 //!     ├── config.rs      DistroConfig implementation
-//!     ├── extract.rs     Alpine APK extraction (placeholder)
-//!     └── component/     OpenRC-specific components (placeholder)
+//!     ├── extract.rs     Alpine APK extraction
+//!     ├── artifact/      Build artifacts (squashfs, initramfs, ISO)
+//!     ├── qemu.rs        QEMU runner
+//!     └── component/     OpenRC-specific components
 //!
 //! Uses:
 //!     ├── distro-spec::acorn    Constants, paths, services
@@ -36,8 +33,14 @@
 //! println!("Init system: {}", config.init_system());
 //! ```
 
+pub mod artifact;
+pub mod cache;
 pub mod component;
 pub mod config;
 pub mod extract;
+pub mod qemu;
+pub mod rebuild;
+pub mod timing;
 
 pub use config::AcornConfig;
+pub use timing::Timer;

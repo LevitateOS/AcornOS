@@ -29,60 +29,37 @@ Both are:
 
 ---
 
-## Status: SKELETON
+## Status: BUILD PIPELINE COMPLETE
 
-This crate is a **structural skeleton only**. Commands return `unimplemented!()`.
+The build pipeline is fully implemented. End-to-end testing needed.
 
 ### What's Implemented
-- CLI structure (`cargo run -- status` works)
+- CLI structure (all commands work)
 - distro-spec/acorn/ configuration (boot modules, paths, services)
 - DistroConfig trait implementation
-
-### What's NOT Implemented (Future Work)
-- Alpine APK extraction
-- OpenRC service setup
-- Component definitions (list of Alpine packages)
-- Initramfs building (with mdev)
-- ISO creation
+- Alpine ISO download and extraction
+- Squashfs builder
+- Initramfs builder (tiny, OpenRC-compatible)
+- ISO builder (UEFI bootable)
 - QEMU runner
 
----
-
-## Development Roadmap
-
-### Phase 1: Alpine Rootfs (NOT STARTED)
-- [ ] Download Alpine minirootfs
-- [ ] Extract to downloads/rootfs
-- [ ] Verify basic structure
-
-### Phase 2: Package Management (NOT STARTED)
-- [ ] Integrate with Alpine APK repos
-- [ ] Download required packages
-- [ ] Extract packages to staging
-
-### Phase 3: OpenRC Setup (NOT STARTED)
-- [ ] Copy OpenRC binary and libraries
-- [ ] Create runlevel structure
-- [ ] Enable boot services (networking, chronyd, sshd)
-
-### Phase 4: Initramfs (NOT STARTED)
-- [ ] Use busybox from Alpine
-- [ ] Set up mdev or eudev
-- [ ] Create init script (similar to leviso but OpenRC)
-
-### Phase 5: ISO Creation (NOT STARTED)
-- [ ] Reuse distro-builder abstractions
-- [ ] Create GRUB config
-- [ ] Build with xorriso
+### What Needs Testing
+- Full end-to-end build (`acornos build`)
+- Boot to OpenRC login prompt
 
 ---
 
 ## Commands
 
 ```bash
-cargo run -- status    # Shows skeleton status
-cargo run -- build     # NOT IMPLEMENTED
-cargo run -- run       # NOT IMPLEMENTED
+cargo run -- status           # Show build status
+cargo run -- download         # Download Alpine Extended ISO (~1GB)
+cargo run -- extract          # Extract ISO and create rootfs
+cargo run -- build squashfs   # Build only squashfs
+cargo run -- build            # Full build (squashfs + initramfs + ISO)
+cargo run -- initramfs        # Rebuild initramfs only
+cargo run -- iso              # Rebuild ISO only
+cargo run -- run              # Boot ISO in QEMU
 ```
 
 ## Key Differences from leviso

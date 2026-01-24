@@ -14,10 +14,19 @@
 //! # Extract ISO and create rootfs
 //! acornos extract
 //!
-//! # Build complete ISO (not yet implemented)
+//! # Build squashfs only
+//! acornos build squashfs
+//!
+//! # Build complete ISO (squashfs + initramfs + ISO)
 //! acornos build
 //!
-//! # Run in QEMU (not yet implemented)
+//! # Rebuild only the initramfs
+//! acornos initramfs
+//!
+//! # Rebuild only the ISO
+//! acornos iso
+//!
+//! # Run in QEMU
 //! acornos run
 //! ```
 //!
@@ -47,8 +56,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Build the complete ISO (squashfs + initramfs + ISO)
-    Build,
+    /// Build artifacts (squashfs, or full build)
+    Build {
+        #[command(subcommand)]
+        artifact: Option<BuildArtifact>,
+    },
 
     /// Rebuild only the initramfs
     Initramfs,
@@ -69,11 +81,20 @@ enum Commands {
     Status,
 }
 
+#[derive(Subcommand)]
+enum BuildArtifact {
+    /// Build only the squashfs from rootfs
+    Squashfs,
+}
+
 fn main() {
     let cli = Cli::parse();
 
     let result = match cli.command {
-        Commands::Build => cmd_build(),
+        Commands::Build { artifact } => match artifact {
+            Some(BuildArtifact::Squashfs) => cmd_build_squashfs(),
+            None => cmd_build(),
+        },
         Commands::Initramfs => cmd_initramfs(),
         Commands::Iso => cmd_iso(),
         Commands::Run => cmd_run(),
@@ -89,48 +110,116 @@ fn main() {
 }
 
 fn cmd_build() -> Result<()> {
-    unimplemented!(
-        "AcornOS build not yet implemented.\n\
-        \n\
-        This requires:\n\
-        - Alpine APK extraction (DONE - use 'acornos extract')\n\
-        - OpenRC service setup\n\
-        - Component definitions\n\
-        \n\
-        See AcornOS/CLAUDE.md for implementation roadmap."
-    )
+    use std::time::Instant;
+    use acornos::Timer;
+
+    // Full build: squashfs + initramfs + ISO
+    // Skips anything already built, rebuilds only on changes.
+    let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let build_start = Instant::now();
+
+    println!("=== Full AcornOS Build ===\n");
+
+    // 1. Build squashfs (skip if inputs unchanged)
+    if acornos::rebuild::squashfs_needs_rebuild(&base_dir) {
+        println!("Building squashfs system image...");
+        let t = Timer::start("Squashfs");
+        acornos::artifact::build_squashfs(&base_dir)?;
+        acornos::rebuild::cache_squashfs_hash(&base_dir);
+        t.finish();
+    } else {
+        println!("[SKIP] Squashfs already built (inputs unchanged)");
+    }
+
+    // 2. Build initramfs (skip if inputs unchanged)
+    if acornos::rebuild::initramfs_needs_rebuild(&base_dir) {
+        println!("\nBuilding tiny initramfs...");
+        let t = Timer::start("Initramfs");
+        acornos::artifact::build_tiny_initramfs(&base_dir)?;
+        acornos::rebuild::cache_initramfs_hash(&base_dir);
+        t.finish();
+    } else {
+        println!("\n[SKIP] Initramfs already built (inputs unchanged)");
+    }
+
+    // 3. Build ISO (skip if components unchanged)
+    if acornos::rebuild::iso_needs_rebuild(&base_dir) {
+        println!("\nBuilding ISO...");
+        let t = Timer::start("ISO");
+        acornos::artifact::create_squashfs_iso(&base_dir)?;
+        t.finish();
+    } else {
+        println!("\n[SKIP] ISO already built (components unchanged)");
+    }
+
+    let total = build_start.elapsed().as_secs_f64();
+    if total >= 60.0 {
+        println!("\n=== Build Complete ({:.1}m) ===", total / 60.0);
+    } else {
+        println!("\n=== Build Complete ({:.1}s) ===", total);
+    }
+    println!("  ISO: output/acornos.iso");
+    println!("\nNext: acornos run");
+
+    Ok(())
+}
+
+fn cmd_build_squashfs() -> Result<()> {
+    let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+
+    if acornos::rebuild::squashfs_needs_rebuild(&base_dir) {
+        acornos::artifact::build_squashfs(&base_dir)?;
+        acornos::rebuild::cache_squashfs_hash(&base_dir);
+    } else {
+        println!("[SKIP] Squashfs already built (inputs unchanged)");
+        println!("  Delete output/filesystem.squashfs to force rebuild");
+    }
+    Ok(())
 }
 
 fn cmd_initramfs() -> Result<()> {
-    unimplemented!(
-        "AcornOS initramfs not yet implemented.\n\
-        \n\
-        This requires:\n\
-        - busybox from Alpine\n\
-        - mdev or eudev setup\n\
-        - OpenRC-compatible init script"
-    )
+    let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+
+    if acornos::rebuild::initramfs_needs_rebuild(&base_dir) {
+        acornos::artifact::build_tiny_initramfs(&base_dir)?;
+        acornos::rebuild::cache_initramfs_hash(&base_dir);
+    } else {
+        println!("[SKIP] Initramfs already built (inputs unchanged)");
+        println!("  Delete output/initramfs-live.cpio.gz to force rebuild");
+    }
+    Ok(())
 }
 
 fn cmd_iso() -> Result<()> {
-    unimplemented!(
-        "AcornOS ISO not yet implemented.\n\
-        \n\
-        This requires:\n\
-        - Built squashfs and initramfs\n\
-        - GRUB configuration\n\
-        - xorriso packaging"
-    )
+    let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+
+    // Ensure dependencies exist first
+    let squashfs = base_dir.join("output/filesystem.squashfs");
+    let initramfs = base_dir.join("output/initramfs-live.cpio.gz");
+
+    if !squashfs.exists() {
+        println!("Squashfs not found, building...");
+        acornos::artifact::build_squashfs(&base_dir)?;
+        acornos::rebuild::cache_squashfs_hash(&base_dir);
+    }
+    if !initramfs.exists() {
+        println!("Initramfs not found, building...");
+        acornos::artifact::build_tiny_initramfs(&base_dir)?;
+        acornos::rebuild::cache_initramfs_hash(&base_dir);
+    }
+
+    if acornos::rebuild::iso_needs_rebuild(&base_dir) {
+        acornos::artifact::create_squashfs_iso(&base_dir)?;
+    } else {
+        println!("[SKIP] ISO already built (components unchanged)");
+        println!("  Delete output/acornos.iso to force rebuild");
+    }
+    Ok(())
 }
 
 fn cmd_run() -> Result<()> {
-    unimplemented!(
-        "AcornOS QEMU runner not yet implemented.\n\
-        \n\
-        This requires:\n\
-        - Built ISO\n\
-        - QEMU with UEFI support"
-    )
+    let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    acornos::qemu::run_iso(&base_dir, None)
 }
 
 fn cmd_download() -> Result<()> {
@@ -194,13 +283,46 @@ fn cmd_status() -> Result<()> {
     }
     println!();
 
+    // Check build artifacts
+    let output_dir = base_dir.join("output");
+    let squashfs = output_dir.join("filesystem.squashfs");
+    let initramfs = output_dir.join("initramfs-live.cpio.gz");
+    let iso = output_dir.join("acornos.iso");
+
+    println!("Build Artifacts:");
+    if squashfs.exists() {
+        let size = std::fs::metadata(&squashfs).map(|m| m.len() / 1024 / 1024).unwrap_or(0);
+        println!("  Squashfs:        BUILT ({} MB)", size);
+    } else {
+        println!("  Squashfs:        NOT BUILT");
+    }
+    if initramfs.exists() {
+        let size = std::fs::metadata(&initramfs).map(|m| m.len() / 1024).unwrap_or(0);
+        println!("  Initramfs:       BUILT ({} KB)", size);
+    } else {
+        println!("  Initramfs:       NOT BUILT");
+    }
+    if iso.exists() {
+        let size = std::fs::metadata(&iso).map(|m| m.len() / 1024 / 1024).unwrap_or(0);
+        println!("  ISO:             BUILT ({} MB)", size);
+    } else {
+        println!("  ISO:             NOT BUILT");
+    }
+    println!();
+
     println!("Next steps:");
     if !paths.iso.exists() {
         println!("  1. Run 'acornos download' to download Alpine Extended ISO");
     } else if !paths.rootfs.exists() {
         println!("  1. Run 'acornos extract' to extract ISO and create rootfs");
+    } else if !squashfs.exists() {
+        println!("  1. Run 'acornos build squashfs' to create filesystem.squashfs");
+    } else if !initramfs.exists() {
+        println!("  1. Run 'acornos initramfs' to create initramfs");
+    } else if !iso.exists() {
+        println!("  1. Run 'acornos iso' to create bootable ISO");
     } else {
-        println!("  1. Rootfs ready! Build/initramfs/ISO commands not yet implemented.");
+        println!("  ISO ready! Run 'acornos run' to boot in QEMU.");
     }
 
     Ok(())

@@ -195,27 +195,29 @@ Result: Live = Installed (same files!)
 ### Implementation status
 
 **Squashfs builder:**
-- [ ] Create squashfs build module
-- [ ] Include ALL binaries from Alpine packages
-- [ ] Include NetworkManager or ifupdown
-- [ ] Include ALL firmware (~200MB)
-- [ ] Generate filesystem.squashfs with mksquashfs
+- [x] Create squashfs build module (`AcornOS/src/artifact/squashfs.rs`)
+- [x] Include ALL binaries from Alpine packages (via `acornos extract`)
+- [~] Include NetworkManager or ifupdown (ifupdown via Alpine packages)
+- [~] Include firmware (via Alpine packages - may need expansion)
+- [x] Generate filesystem.squashfs with mksquashfs
 
 **Tiny initramfs:**
-- [ ] Create initramfs module - minimal boot initramfs (~5MB)
-- [ ] Include busybox (all applets needed for boot)
-- [ ] Mount squashfs read-only
-- [ ] Mount overlay (tmpfs) for writes
-- [ ] switch_root to live system
-- [ ] Start OpenRC
+- [x] Create initramfs module (`AcornOS/src/artifact/initramfs.rs`)
+- [x] Include busybox (all applets needed for boot)
+- [x] Mount squashfs read-only
+- [x] Mount overlay (tmpfs) for writes
+- [x] switch_root to live system
+- [x] Start OpenRC (via `/sbin/openrc-init`)
+- [x] Init script template (`AcornOS/profile/init_tiny.template`)
 
 **Installation tool:**
-- [ ] Create extraction tool (like recstrap)
+- [ ] Create extraction tool (like recstrap) - uses unsquashfs for now
 
 **Integration:**
-- [ ] Update ISO builder for AcornOS layout
-- [ ] Include installation tools in squashfs
-- [ ] Create welcome message with install steps
+- [x] Update ISO builder for AcornOS layout (`AcornOS/src/artifact/iso.rs`)
+- [x] Include installation tools in squashfs (Alpine packages)
+- [x] Create live overlay with autologin and serial console
+- [x] QEMU runner (`AcornOS/src/qemu.rs`)
 
 ---
 
@@ -236,14 +238,15 @@ Result: Live = Installed (same files!)
 - [x] Services (OpenRC boot essentials)
 - [x] OS constants (name, ID, ISO label)
 
-### CLI Commands (Stubs)
-- [x] `acornos status` - Shows configuration
-- [ ] `acornos build` - NOT IMPLEMENTED
-- [ ] `acornos initramfs` - NOT IMPLEMENTED
-- [ ] `acornos iso` - NOT IMPLEMENTED
-- [ ] `acornos run` - NOT IMPLEMENTED
-- [ ] `acornos download` - NOT IMPLEMENTED
-- [ ] `acornos extract` - NOT IMPLEMENTED
+### CLI Commands
+- [x] `acornos status` - Shows configuration and build status
+- [x] `acornos download` - Downloads Alpine Extended ISO and apk-tools
+- [x] `acornos extract` - Extracts ISO and creates rootfs
+- [x] `acornos build squashfs` - Builds filesystem.squashfs from rootfs
+- [x] `acornos build` - Full build (squashfs + initramfs + ISO)
+- [x] `acornos initramfs` - Builds tiny initramfs (~5MB)
+- [x] `acornos iso` - Builds bootable ISO
+- [x] `acornos run` - Boots ISO in QEMU
 
 ---
 

@@ -1,0 +1,310 @@
+//! Tiny initramfs builder (~5MB).
+//!
+//! Creates a minimal initramfs containing only:
+//! - Static busybox binary (~1MB)
+//! - /init script (shell script that mounts squashfs)
+//! - Kernel modules for boot
+//! - Minimal directory structure
+//!
+//! # Key Difference from leviso
+//!
+//! AcornOS uses Alpine's kernel which has modules compressed with gzip (.ko.gz)
+//! rather than xz (.ko.xz) like Rocky.
+//!
+//! # Boot Flow
+//!
+//! ```text
+//! 1. GRUB loads kernel + this initramfs
+//! 2. Kernel extracts initramfs to rootfs, runs /init
+//! 3. /init (busybox sh script):
+//!    a. Mount /proc, /sys, /dev
+//!    b. Find boot device by LABEL=ACORNOS
+//!    c. Mount ISO read-only
+//!    d. Mount filesystem.squashfs via loop device
+//!    e. Create overlay: squashfs (lower) + tmpfs (upper)
+//!    f. switch_root to overlay
+//! 4. OpenRC (PID 1) takes over
+//! ```
+
+use anyhow::{bail, Context, Result};
+use std::env;
+use std::fs;
+use std::os::unix::fs::PermissionsExt;
+use std::path::Path;
+
+use distro_builder::process::{shell, Cmd};
+use distro_spec::acorn::{
+    BOOT_MODULES,
+    BOOT_DEVICE_PROBE_ORDER,
+    BUSYBOX_URL,
+    BUSYBOX_URL_ENV,
+    CPIO_GZIP_LEVEL,
+    INITRAMFS_BUILD_DIR,
+    INITRAMFS_DIRS,
+    INITRAMFS_LIVE_OUTPUT,
+    ISO_LABEL,
+    LIVE_OVERLAY_ISO_PATH,
+    SQUASHFS_ISO_PATH,
+};
+
+use crate::extract::ExtractPaths;
+
+/// Get busybox download URL from environment or use default.
+fn busybox_url() -> String {
+    env::var(BUSYBOX_URL_ENV).unwrap_or_else(|_| BUSYBOX_URL.to_string())
+}
+
+/// Commands to symlink from busybox.
+const BUSYBOX_COMMANDS: &[&str] = &[
+    "sh", "mount", "umount", "mkdir", "cat", "ls", "sleep", "switch_root", "echo", "test", "[",
+    "grep", "sed", "ln", "rm", "cp", "mv", "chmod", "chown", "mknod", "losetup", "mount.loop",
+    "insmod", "modprobe", "xz", "gunzip", "find", "head",
+];
+
+/// Build the tiny initramfs.
+pub fn build_tiny_initramfs(base_dir: &Path) -> Result<()> {
+    println!("=== Building Tiny Initramfs ===\n");
+
+    let output_dir = base_dir.join("output");
+    let initramfs_root = output_dir.join(INITRAMFS_BUILD_DIR);
+    let output_cpio = output_dir.join(INITRAMFS_LIVE_OUTPUT);
+
+    // Clean previous build
+    if initramfs_root.exists() {
+        fs::remove_dir_all(&initramfs_root)?;
+    }
+
+    // Create minimal directory structure
+    create_directory_structure(&initramfs_root)?;
+
+    // Copy/download busybox
+    copy_busybox(base_dir, &initramfs_root)?;
+
+    // Copy kernel modules from rootfs
+    copy_boot_modules(base_dir, &initramfs_root)?;
+
+    // Create init script from template
+    create_init_script(base_dir, &initramfs_root)?;
+
+    // Build cpio archive to a temporary file
+    let temp_cpio = output_dir.join(format!("{}.tmp", INITRAMFS_LIVE_OUTPUT));
+    build_cpio(&initramfs_root, &temp_cpio)?;
+
+    // Verify the temporary artifact is valid
+    if !temp_cpio.exists() || fs::metadata(&temp_cpio)?.len() < 1024 {
+        bail!("Initramfs build produced invalid or empty file");
+    }
+
+    // Atomic rename to final destination
+    fs::rename(&temp_cpio, &output_cpio)?;
+
+    let size = fs::metadata(&output_cpio)?.len();
+    println!("\n=== Tiny Initramfs Complete ===");
+    println!("  Output: {}", output_cpio.display());
+    println!("  Size: {} KB", size / 1024);
+
+    Ok(())
+}
+
+/// Create minimal directory structure.
+fn create_directory_structure(root: &Path) -> Result<()> {
+    println!("Creating directory structure...");
+
+    for dir in INITRAMFS_DIRS {
+        fs::create_dir_all(root.join(dir))?;
+    }
+
+    // Create /dev with a note
+    let dev = root.join("dev");
+    fs::create_dir_all(&dev)?;
+    fs::write(
+        dev.join(".note"),
+        "# Device nodes are created by devtmpfs mount in /init\n",
+    )?;
+
+    Ok(())
+}
+
+/// Download or copy busybox static binary.
+fn copy_busybox(base_dir: &Path, initramfs_root: &Path) -> Result<()> {
+    println!("Setting up busybox...");
+
+    let downloads_dir = base_dir.join("downloads");
+    let busybox_cache = downloads_dir.join("busybox-static");
+    let busybox_dst = initramfs_root.join("bin/busybox");
+
+    // Download if not cached
+    if !busybox_cache.exists() {
+        let url = busybox_url();
+        println!("  Downloading static busybox from {}", url);
+        fs::create_dir_all(&downloads_dir)?;
+
+        Cmd::new("curl")
+            .args(["-L", "-o"])
+            .arg_path(&busybox_cache)
+            .args(["--progress-bar", &url])
+            .error_msg("Failed to download busybox. Install: sudo dnf install curl")
+            .run_interactive()?;
+    }
+
+    // Copy to initramfs
+    fs::copy(&busybox_cache, &busybox_dst)?;
+
+    // Make executable
+    let mut perms = fs::metadata(&busybox_dst)?.permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(&busybox_dst, perms)?;
+
+    // Create symlinks for common commands
+    println!("  Creating busybox symlinks...");
+    for cmd in BUSYBOX_COMMANDS {
+        let link = initramfs_root.join("bin").join(cmd);
+        if !link.exists() {
+            std::os::unix::fs::symlink("busybox", &link)?;
+        }
+    }
+
+    println!("  Busybox ready ({} commands)", BUSYBOX_COMMANDS.len());
+    Ok(())
+}
+
+/// Copy boot kernel modules to the initramfs.
+///
+/// Alpine kernel modules use gzip compression (.ko.gz).
+fn copy_boot_modules(base_dir: &Path, initramfs_root: &Path) -> Result<()> {
+    println!("Copying boot kernel modules...");
+
+    let paths = ExtractPaths::new(base_dir);
+    let modules_path = paths.rootfs.join("lib/modules");
+
+    if !modules_path.exists() {
+        bail!(
+            "No kernel modules found at {}.\n\
+             Run 'acornos extract' first.",
+            modules_path.display()
+        );
+    }
+
+    // Find the kernel version directory
+    let kernel_version = fs::read_dir(&modules_path)?
+        .filter_map(|e| e.ok())
+        .find(|e| e.path().is_dir())
+        .map(|e| e.file_name().to_string_lossy().to_string());
+
+    let Some(kver) = kernel_version else {
+        bail!(
+            "No kernel version directory found in {}.\n\
+             The rootfs may be incomplete.",
+            modules_path.display()
+        );
+    };
+
+    println!("  Kernel version: {}", kver);
+
+    let kmod_src = modules_path.join(&kver);
+    let kmod_dst = initramfs_root.join("lib/modules").join(&kver);
+    fs::create_dir_all(&kmod_dst)?;
+
+    // Copy each boot module - all are required
+    let mut copied = 0;
+    let mut missing = Vec::new();
+    for module_path in BOOT_MODULES {
+        // Try to find the module with different extensions
+        let base_path = module_path
+            .trim_end_matches(".ko.xz")
+            .trim_end_matches(".ko.gz")
+            .trim_end_matches(".ko");
+
+        let mut found = false;
+        for ext in [".ko", ".ko.gz", ".ko.xz"] {
+            let src = kmod_src.join(format!("{}{}", base_path, ext));
+            if src.exists() {
+                let dst = kmod_dst.join(format!("{}{}", base_path, ext));
+                fs::create_dir_all(dst.parent().unwrap())?;
+                fs::copy(&src, &dst)?;
+                copied += 1;
+                found = true;
+                break;
+            }
+        }
+
+        if !found {
+            missing.push(*module_path);
+        }
+    }
+
+    // FAIL FAST if any module is missing
+    if !missing.is_empty() {
+        bail!(
+            "Boot modules missing: {:?}\n\
+             \n\
+             These kernel modules are REQUIRED for the ISO to boot:\n\
+             - cdrom, sr_mod, virtio_scsi, isofs (CDROM access)\n\
+             - loop, squashfs, overlay (squashfs + overlay boot)\n\
+             \n\
+             The Alpine rootfs may be incomplete.",
+            missing
+        );
+    }
+
+    println!("  Copied {} boot modules", copied);
+    Ok(())
+}
+
+/// Create the init script from template.
+fn create_init_script(base_dir: &Path, initramfs_root: &Path) -> Result<()> {
+    println!("Creating init script from template...");
+
+    let init_content = generate_init_script(base_dir)?;
+    let init_dst = initramfs_root.join("init");
+
+    fs::write(&init_dst, &init_content)?;
+
+    // Make executable
+    let mut perms = fs::metadata(&init_dst)?.permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(&init_dst, perms)?;
+
+    Ok(())
+}
+
+/// Build the cpio archive from initramfs root.
+fn build_cpio(root: &Path, output: &Path) -> Result<()> {
+    println!("Building cpio archive...");
+
+    let cpio_cmd = format!(
+        "cd {} && find . -print0 | cpio --null -o -H newc 2>/dev/null | gzip -{} > {}",
+        root.display(),
+        CPIO_GZIP_LEVEL,
+        output.display()
+    );
+
+    shell(&cpio_cmd)?;
+
+    Ok(())
+}
+
+/// Generate init script from template with distro-spec values.
+fn generate_init_script(base_dir: &Path) -> Result<String> {
+    let template_path = base_dir.join("profile/init_tiny.template");
+    let template = fs::read_to_string(&template_path)
+        .with_context(|| format!("Failed to read init_tiny.template at {}", template_path.display()))?;
+
+    // Extract module names from full paths
+    // e.g., "kernel/fs/squashfs/squashfs.ko.gz" -> "squashfs"
+    let module_names: Vec<&str> = BOOT_MODULES
+        .iter()
+        .filter_map(|m| m.rsplit('/').next())
+        .map(|m| m.trim_end_matches(".ko.xz").trim_end_matches(".ko.gz").trim_end_matches(".ko"))
+        .collect();
+
+    Ok(template
+        .replace("{{ISO_LABEL}}", ISO_LABEL)
+        .replace("{{SQUASHFS_PATH}}", &format!("/{}", SQUASHFS_ISO_PATH))
+        .replace("{{BOOT_MODULES}}", &module_names.join(" "))
+        .replace("{{BOOT_DEVICES}}", &BOOT_DEVICE_PROBE_ORDER.join(" "))
+        .replace(
+            "{{LIVE_OVERLAY_PATH}}",
+            &format!("/{}", LIVE_OVERLAY_ISO_PATH),
+        ))
+}
