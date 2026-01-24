@@ -2,7 +2,11 @@
 name = "acornos"
 version = "0.1.0"
 edition = "2021"
-description = "AcornOS ISO builder - Alpine + OpenRC + musl + busybox"
+description = "AcornOS ISO builder - Alpine Linux + OpenRC + musl + busybox"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/LevitateOS/AcornOS"
+keywords = ["linux", "alpine", "openrc", "musl", "iso"]
+categories = ["command-line-utilities", "development-tools::build-utils"]
 
 [dependencies]
 anyhow = "1.0"

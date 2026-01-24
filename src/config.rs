@@ -1,12 +1,25 @@
-//! AcornOS kernel and build configuration.
+//! AcornOS distribution configuration.
 //!
-//! # Status: SKELETON
+//! Implements [`DistroConfig`] for AcornOS, providing all the
+//! distro-specific constants needed by the build infrastructure.
 //!
-//! Placeholder for AcornOS-specific kernel configuration.
+//! # Example
+//!
+//! ```rust
+//! use acornos::config::AcornConfig;
+//! use distro_builder::DistroConfig;
+//!
+//! let config = AcornConfig;
+//! assert_eq!(config.os_name(), "AcornOS");
+//! assert_eq!(config.default_shell(), "/bin/ash");
+//! ```
 
 use distro_builder::build::context::{DistroConfig, InitSystem};
 
 /// AcornOS distribution configuration.
+///
+/// This struct implements [`DistroConfig`] by delegating to
+/// constants defined in [`distro_spec::acorn`].
 pub struct AcornConfig;
 
 impl DistroConfig for AcornConfig {
@@ -40,5 +53,27 @@ impl DistroConfig for AcornConfig {
 
     fn squashfs_block_size(&self) -> &str {
         distro_spec::acorn::SQUASHFS_BLOCK_SIZE
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_acorn_config() {
+        let config = AcornConfig;
+
+        assert_eq!(config.os_name(), "AcornOS");
+        assert_eq!(config.os_id(), "acornos");
+        assert_eq!(config.iso_label(), "ACORNOS");
+        assert_eq!(config.default_shell(), "/bin/ash");
+        assert_eq!(config.init_system(), InitSystem::OpenRC);
+    }
+
+    #[test]
+    fn test_boot_modules_not_empty() {
+        let config = AcornConfig;
+        assert!(!config.boot_modules().is_empty());
     }
 }

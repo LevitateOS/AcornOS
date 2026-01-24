@@ -1,34 +1,63 @@
 //! AcornOS component definitions.
 //!
-//! # Status: SKELETON
+//! This module contains AcornOS-specific component definitions,
+//! similar to leviso's `component/definitions.rs`.
 //!
-//! This module will contain AcornOS-specific component definitions
-//! similar to leviso's definitions.rs.
+//! # Key Differences from LevitateOS
 //!
-//! Key differences from LevitateOS:
-//! - OpenRC service operations instead of systemd
-//! - busybox applet setup instead of GNU coreutils
-//! - mdev device manager instead of udev
-//! - musl-specific library paths
+//! | Aspect | LevitateOS | AcornOS |
+//! |--------|-----------|---------|
+//! | Init | systemd units | OpenRC services |
+//! | Coreutils | GNU binaries | busybox applets |
+//! | Device manager | udev | mdev (busybox) |
+//! | Shell | bash | ash (busybox) |
+//! | Library paths | /usr/lib64 (glibc) | /usr/lib (musl) |
+//!
+//! # Status
+//!
+//! **PLACEHOLDER** - Component definitions not yet implemented.
+//!
+//! # Example (future)
+//!
+//! ```rust,ignore
+//! use acornos::component::{OpenRCComponent, BusyboxComponent};
+//! use distro_builder::component::Installable;
+//!
+//! let openrc = OpenRCComponent;
+//! let busybox = BusyboxComponent;
+//!
+//! for op in openrc.ops() {
+//!     executor.execute(op)?;
+//! }
+//! ```
 
 use distro_builder::component::{Installable, Op, Phase};
 
 /// OpenRC service operation.
 ///
 /// AcornOS uses OpenRC instead of systemd.
-/// This enum defines OpenRC-specific operations.
 #[derive(Debug, Clone)]
 pub enum OpenRCOp {
-    /// Add service to runlevel: rc-update add <service> <runlevel>
+    /// Add service to runlevel.
+    ///
+    /// Equivalent to: `rc-update add <service> <runlevel>`
     AddService {
+        /// Service name (e.g., "sshd", "networking")
         service: String,
+        /// Runlevel (e.g., "boot", "default", "sysinit")
         runlevel: String,
     },
-    /// Copy OpenRC service script
+
+    /// Copy an OpenRC service script to /etc/init.d/
     CopyService(String),
-    /// Create OpenRC conf.d file
+
+    /// Create an OpenRC conf.d configuration file.
+    ///
+    /// Creates /etc/conf.d/<service> with the given content.
     CreateConf {
+        /// Service name
         service: String,
+        /// Configuration content
         content: String,
     },
 }
@@ -36,13 +65,18 @@ pub enum OpenRCOp {
 /// Busybox applet setup operation.
 #[derive(Debug, Clone)]
 pub enum BusyboxOp {
-    /// Create symlinks for busybox applets
+    /// Create symlinks for busybox applets in /bin and /sbin.
     CreateAppletSymlinks(Vec<String>),
-    /// Install busybox binary
+
+    /// Install the busybox binary to /bin/busybox.
     InstallBusybox,
 }
 
 /// Placeholder component for AcornOS filesystem setup.
+///
+/// # Status
+///
+/// **PLACEHOLDER** - Returns empty ops.
 pub struct FilesystemComponent;
 
 impl Installable for FilesystemComponent {
@@ -56,14 +90,19 @@ impl Installable for FilesystemComponent {
 
     fn ops(&self) -> Vec<Op> {
         // TODO: Implement AcornOS filesystem operations
-        // This will be similar to LevitateOS but with:
-        // - /bin/sh -> busybox instead of bash
-        // - Different library paths for musl
+        // Differences from LevitateOS:
+        // - /bin/sh -> busybox (not bash)
+        // - /usr/lib only (no /usr/lib64 with musl)
+        // - Different FHS layout for Alpine
         vec![]
     }
 }
 
 /// Placeholder component for OpenRC setup.
+///
+/// # Status
+///
+/// **PLACEHOLDER** - Returns empty ops.
 pub struct OpenRCComponent;
 
 impl Installable for OpenRCComponent {
@@ -79,7 +118,52 @@ impl Installable for OpenRCComponent {
         // TODO: Implement OpenRC setup
         // - Copy openrc binary and libraries
         // - Set up /etc/rc.conf
-        // - Create runlevel directories
+        // - Create runlevel directories (/etc/runlevels/*)
+        // - Copy init scripts to /etc/init.d/
         vec![]
+    }
+}
+
+/// Placeholder component for busybox setup.
+///
+/// # Status
+///
+/// **PLACEHOLDER** - Returns empty ops.
+pub struct BusyboxComponent;
+
+impl Installable for BusyboxComponent {
+    fn name(&self) -> &str {
+        "Busybox"
+    }
+
+    fn phase(&self) -> Phase {
+        Phase::Binaries
+    }
+
+    fn ops(&self) -> Vec<Op> {
+        // TODO: Implement busybox setup
+        // - Copy busybox binary
+        // - Create applet symlinks (ls, cat, grep, etc.)
+        // - Set up /bin/sh -> busybox
+        vec![]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_component_phases() {
+        assert_eq!(FilesystemComponent.phase(), Phase::Filesystem);
+        assert_eq!(OpenRCComponent.phase(), Phase::Init);
+        assert_eq!(BusyboxComponent.phase(), Phase::Binaries);
+    }
+
+    #[test]
+    fn test_component_names() {
+        assert_eq!(FilesystemComponent.name(), "Filesystem");
+        assert_eq!(OpenRCComponent.name(), "OpenRC");
+        assert_eq!(BusyboxComponent.name(), "Busybox");
     }
 }
