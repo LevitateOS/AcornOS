@@ -97,11 +97,11 @@ impl QemuBuilder {
         // Memory (4G - AcornOS is a daily driver OS)
         cmd.args(["-m", &format!("{}G", QEMU_MEMORY_GB)]);
 
-        // CD-ROM (use virtio-scsi for better compatibility)
+        // CD-ROM (use AHCI for consistency with LevitateOS/real hardware)
         if let Some(cdrom) = &self.cdrom {
             cmd.args([
-                "-device", "virtio-scsi-pci,id=scsi0",
-                "-device", "scsi-cd,drive=cdrom0,bus=scsi0.0",
+                "-device", "ahci,id=ahci0",
+                "-device", "ide-cd,drive=cdrom0,bus=ahci0.0",
                 "-drive", &format!("id=cdrom0,if=none,format=raw,readonly=on,file={}", cdrom.display()),
             ]);
         }
@@ -274,10 +274,10 @@ pub fn test_iso(base_dir: &Path, timeout_secs: u64) -> Result<()> {
     cmd.args(["-smp", "2"]);
     cmd.args(["-m", &format!("{}G", QEMU_MEMORY_GB)]);
 
-    // CD-ROM via virtio-scsi
+    // CD-ROM via AHCI (consistency with LevitateOS/real hardware)
     cmd.args([
-        "-device", "virtio-scsi-pci,id=scsi0",
-        "-device", "scsi-cd,drive=cdrom0,bus=scsi0.0",
+        "-device", "ahci,id=ahci0",
+        "-device", "ide-cd,drive=cdrom0,bus=ahci0.0",
         "-drive", &format!("id=cdrom0,if=none,format=raw,readonly=on,file={}", iso_path.display()),
     ]);
 

@@ -315,6 +315,8 @@ fn setup_uefi_boot(paths: &IsoPaths) -> Result<()> {
     let label = iso_label();
     // Modules needed for live boot (match Alpine's approach)
     let modules = "modules=loop,squashfs,overlay,virtio_pci,virtio_blk,virtio_scsi,sd-mod,sr-mod,cdrom,isofs";
+    // IMPORTANT: console= order matters. The LAST console becomes /dev/console for init.
+    // For serial testing, ttyS0 must be last so init's stdout goes to serial.
     let grub_cfg = format!(
         r#"# Serial console for automated testing
 serial --speed=115200 --unit=0 --word=8 --parity=no --stop=1
@@ -339,9 +341,10 @@ menuentry '{} (Debug)' {{
     initrd /{}
 }}
 "#,
-        OS_NAME, KERNEL_ISO_PATH, modules, label, SERIAL_CONSOLE, VGA_CONSOLE, INITRAMFS_LIVE_ISO_PATH,
-        OS_NAME, KERNEL_ISO_PATH, modules, label, SERIAL_CONSOLE, VGA_CONSOLE, INITRAMFS_LIVE_ISO_PATH,
-        OS_NAME, KERNEL_ISO_PATH, modules, label, SERIAL_CONSOLE, VGA_CONSOLE, INITRAMFS_LIVE_ISO_PATH,
+        // VGA first, serial LAST - so /dev/console -> serial for testing
+        OS_NAME, KERNEL_ISO_PATH, modules, label, VGA_CONSOLE, SERIAL_CONSOLE, INITRAMFS_LIVE_ISO_PATH,
+        OS_NAME, KERNEL_ISO_PATH, modules, label, VGA_CONSOLE, SERIAL_CONSOLE, INITRAMFS_LIVE_ISO_PATH,
+        OS_NAME, KERNEL_ISO_PATH, modules, label, VGA_CONSOLE, SERIAL_CONSOLE, INITRAMFS_LIVE_ISO_PATH,
     );
 
     // Write to both locations for compatibility:

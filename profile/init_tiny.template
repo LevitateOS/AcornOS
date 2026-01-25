@@ -20,19 +20,14 @@
 # Minimal PATH - busybox provides everything
 export PATH=/bin
 
-# Console output helper - writes to both console and serial
-log() {
-    /bin/busybox echo "$1"
-    /bin/busybox echo "$1" > /dev/console 2>&1 || true
-}
+# Debug: print every command
+busybox echo "=== ACORNOS INIT STARTING ==="
 
-log "=== ACORNOS INIT STARTING ==="
+busybox echo "Mounting proc..."
+busybox mount -t proc proc /proc || busybox echo "FAILED: mount proc"
 
-log "Mounting proc..."
-/bin/busybox mount -t proc proc /proc || log "FAILED: mount proc"
-
-log "Mounting sysfs..."
-/bin/busybox mount -t sysfs sysfs /sys || log "FAILED: mount sysfs"
+busybox echo "Mounting sysfs..."
+busybox mount -t sysfs sysfs /sys || busybox echo "FAILED: mount sysfs"
 
 busybox echo "Mounting devtmpfs..."
 busybox mount -t devtmpfs devtmpfs /dev || busybox echo "FAILED: mount devtmpfs"

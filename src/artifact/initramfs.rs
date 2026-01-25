@@ -114,12 +114,13 @@ fn create_directory_structure(root: &Path) -> Result<()> {
         fs::create_dir_all(root.join(dir))?;
     }
 
-    // Create /dev with a note
+    // Create /dev directory
+    // Device nodes will be added via gen_init_cpio (doesn't require root)
     let dev = root.join("dev");
     fs::create_dir_all(&dev)?;
     fs::write(
         dev.join(".note"),
-        "# Device nodes are created by devtmpfs mount in /init\n",
+        "# Device nodes are created by gen_init_cpio or devtmpfs\n",
     )?;
 
     Ok(())
