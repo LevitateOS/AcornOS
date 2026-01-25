@@ -63,6 +63,8 @@ AcornOS is a **sibling distribution** to LevitateOS, sharing the same goals but 
 | Crate structure | Skeleton only |
 | DistroConfig implementation | Working |
 | distro-spec/acorn constants | Complete |
+| OpenRC boot to login | ✅ Verified |
+| Networking (DHCP) | ✅ Verified (virtio_net, dhcpcd) |
 
 ---
 
