@@ -45,8 +45,8 @@ AcornOS is a **sibling distribution** to LevitateOS, sharing the same goals but 
 
 | Gap | Impact | Status |
 |-----|--------|--------|
-| Volatile journal/log storage | Logs may fill tmpfs | NOT CONFIGURED |
-| do-not-suspend config | Live session may sleep during install | NOT CONFIGURED |
+| Volatile journal/log storage | Logs may fill tmpfs | ✅ CONFIGURED |
+| do-not-suspend config | Live session may sleep during install | ✅ CONFIGURED |
 | SSH server (openssh) | No remote installation/rescue | ✅ IN BUILD |
 | pciutils (lspci) | Cannot identify PCI hardware | ✅ IN BUILD |
 | usbutils (lsusb) | Cannot identify USB devices | ✅ IN BUILD |
@@ -434,8 +434,8 @@ These are known gaps in the live environment (squashfs):
 - [x] `wireless-regdb` - WiFi regulatory database
 
 ### Live Environment Config (P1)
-- [ ] Volatile log storage (prevent tmpfs fill)
-- [ ] do-not-suspend config (prevent sleep during install)
+- [x] Volatile log storage (prevent tmpfs fill) - /var/log on 64M tmpfs
+- [x] do-not-suspend config (prevent sleep during install) - ACPI handler + elogind
 
 ### User Tools (Essential)
 - [ ] `passwd` - interactive password setting
@@ -977,8 +977,8 @@ Some software has glibc-specific assumptions:
 - [x] **btrfs-progs** - Btrfs filesystem support
 
 ### P1 - Should Have (Alpine parity)
-- [ ] Volatile log storage (prevent tmpfs fill)
-- [ ] do-not-suspend config
+- [x] Volatile log storage (prevent tmpfs fill)
+- [x] do-not-suspend config
 - [x] SSH server (openssh)
 - [x] Hardware probing: lspci, lsusb, dmidecode
 - [x] ethtool (NIC diagnostics)

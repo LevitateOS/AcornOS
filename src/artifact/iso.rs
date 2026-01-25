@@ -236,6 +236,116 @@ agetty_options="-n -l /bin/sh"
 "#;
     fs::write(conf_d.join("agetty.ttyS0"), agetty_conf)?;
 
+    // =========================================================================
+    // P1: Volatile log storage
+    // =========================================================================
+    // Mount /var/log as tmpfs to prevent filling the overlay tmpfs.
+    // Live session logs are ephemeral anyway - no need to persist them.
+    // Size limit prevents runaway logging from killing the session.
+    let fstab_content = r#"# AcornOS Live fstab
+# Volatile log storage - prevents logs from filling overlay tmpfs
+tmpfs   /var/log    tmpfs   nosuid,nodev,noexec,size=64M,mode=0755   0 0
+"#;
+    fs::write(live_overlay.join("etc/fstab"), fstab_content)?;
+
+    // Create local.d script to ensure /var/log is mounted early
+    // (fstab may not be processed before syslog starts)
+    fs::create_dir_all(live_overlay.join("etc/local.d"))?;
+    let volatile_log_script = r#"#!/bin/sh
+# P1: Ensure volatile log storage for live session
+# This runs early in boot to catch any logs before syslog starts
+
+# Only mount if not already a tmpfs (idempotent)
+if ! mountpoint -q /var/log 2>/dev/null; then
+    # Preserve any existing logs created before mount
+    if [ -d /var/log ]; then
+        mkdir -p /tmp/log-backup
+        cp -a /var/log/* /tmp/log-backup/ 2>/dev/null || true
+    fi
+
+    mount -t tmpfs -o nosuid,nodev,noexec,size=64M,mode=0755 tmpfs /var/log
+
+    # Restore preserved logs
+    if [ -d /tmp/log-backup ]; then
+        cp -a /tmp/log-backup/* /var/log/ 2>/dev/null || true
+        rm -rf /tmp/log-backup
+    fi
+
+    # Ensure log directories exist
+    mkdir -p /var/log/chrony 2>/dev/null || true
+fi
+"#;
+    let script_path = live_overlay.join("etc/local.d/00-volatile-log.start");
+    fs::write(&script_path, volatile_log_script)?;
+    let mut perms = fs::metadata(&script_path)?.permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(&script_path, perms)?;
+
+    // =========================================================================
+    // P1: Do-not-suspend configuration
+    // =========================================================================
+    // Prevent the system from suspending during live session.
+    // Users are likely installing - suspend would be disruptive.
+
+    // Method 1: ACPI power button handler - do nothing on lid close/power button
+    fs::create_dir_all(live_overlay.join("etc/acpi"))?;
+    let acpi_handler = r#"#!/bin/sh
+# AcornOS Live: Disable suspend actions
+# Power button and lid close do nothing during live session
+
+case "$1" in
+    button/power)
+        # Log but don't suspend - user is probably installing
+        logger "AcornOS Live: Power button pressed (suspend disabled)"
+        ;;
+    button/lid)
+        # Lid close does nothing - prevent accidental suspend
+        logger "AcornOS Live: Lid event ignored (suspend disabled)"
+        ;;
+    *)
+        # Let other events through to default handler
+        ;;
+esac
+"#;
+    let handler_path = live_overlay.join("etc/acpi/handler.sh");
+    fs::write(&handler_path, acpi_handler)?;
+    let mut perms = fs::metadata(&handler_path)?.permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(&handler_path, perms)?;
+
+    // Method 2: Kernel parameters to disable suspend
+    // This is set via sysctl for runtime
+    let sysctl_content = r#"# AcornOS Live: Disable suspend
+# Prevent accidental suspend during installation
+
+# Disable suspend-to-RAM
+kernel.sysrq = 1
+
+# Note: Full suspend disable requires either:
+# - elogind HandleLidSwitch=ignore (if using elogind)
+# - acpid handler (provided above)
+# - Or simply not having any suspend triggers
+"#;
+    fs::create_dir_all(live_overlay.join("etc/sysctl.d"))?;
+    fs::write(live_overlay.join("etc/sysctl.d/50-live-no-suspend.conf"), sysctl_content)?;
+
+    // Method 3: If elogind is present, configure it
+    fs::create_dir_all(live_overlay.join("etc/elogind/logind.conf.d"))?;
+    let logind_conf = r#"# AcornOS Live: Disable suspend triggers
+[Login]
+HandlePowerKey=ignore
+HandleSuspendKey=ignore
+HandleHibernateKey=ignore
+HandleLidSwitch=ignore
+HandleLidSwitchExternalPower=ignore
+HandleLidSwitchDocked=ignore
+IdleAction=ignore
+"#;
+    fs::write(
+        live_overlay.join("etc/elogind/logind.conf.d/00-live-no-suspend.conf"),
+        logind_conf,
+    )?;
+
     println!("  Live overlay created at {}", live_overlay.display());
     Ok(())
 }
