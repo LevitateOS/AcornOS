@@ -12,7 +12,7 @@
 //! AcornOS (this crate)
 //!     │
 //!     ├── config.rs      DistroConfig implementation
-//!     ├── extract.rs     Alpine APK extraction
+//!     ├── extract.rs     Path definitions (download logic in deps/alpine.rhai)
 //!     ├── artifact/      Build artifacts (squashfs, initramfs, ISO)
 //!     ├── qemu.rs        QEMU runner
 //!     └── component/     OpenRC-specific components
@@ -37,7 +37,6 @@ pub mod artifact;
 pub mod cache;
 pub mod component;
 pub mod config;
-pub mod deps;
 pub mod extract;
 pub mod preflight;
 pub mod qemu;

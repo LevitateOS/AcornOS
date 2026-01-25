@@ -9,10 +9,7 @@
 //! acornos status
 //!
 //! # Download Alpine Extended ISO (~1GB)
-//! acornos download
-//!
-//! # Extract ISO and create rootfs
-//! acornos extract
+//! recipe resolve alpine
 //!
 //! # Build squashfs only
 //! acornos build squashfs
@@ -39,8 +36,6 @@
 //! | libc | glibc | musl |
 //! | Coreutils | GNU | busybox |
 //! | Shell | bash | ash (busybox) |
-
-mod extract;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -78,12 +73,6 @@ enum Commands {
         timeout: u64,
     },
 
-    /// Download Alpine Extended ISO and apk-tools
-    Download,
-
-    /// Extract Alpine ISO and create rootfs
-    Extract,
-
     /// Show build status and next steps
     Status,
 }
@@ -106,8 +95,6 @@ fn main() {
         Commands::Iso => cmd_iso(),
         Commands::Run => cmd_run(),
         Commands::Test { timeout } => cmd_test(timeout),
-        Commands::Download => cmd_download(),
-        Commands::Extract => cmd_extract(),
         Commands::Status => cmd_status(),
     };
 
@@ -235,26 +222,14 @@ fn cmd_test(timeout: u64) -> Result<()> {
     acornos::qemu::test_iso(&base_dir, timeout)
 }
 
-fn cmd_download() -> Result<()> {
-    let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-
-    // Create tokio runtime for async download
-    let rt = tokio::runtime::Runtime::new()?;
-    rt.block_on(extract::cmd_download_impl(&base_dir))
-}
-
-fn cmd_extract() -> Result<()> {
-    let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    extract::cmd_extract_impl(&base_dir)
-}
-
 fn cmd_status() -> Result<()> {
     use acornos::config::AcornConfig;
+    use acornos::extract::ExtractPaths;
     use distro_builder::DistroConfig;
 
     let config = AcornConfig;
     let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let paths = extract::ExtractPaths::new(&base_dir);
+    let paths = ExtractPaths::new(&base_dir);
 
     println!("AcornOS Builder Status");
     println!("======================");
@@ -267,32 +242,24 @@ fn cmd_status() -> Result<()> {
     println!("  Shell:       {}", config.default_shell());
     println!();
 
-    println!("Downloads:");
+    println!("Dependencies (managed by recipe):");
     if paths.iso.exists() {
         println!("  Alpine ISO:      FOUND at {}", paths.iso.display());
     } else {
-        println!("  Alpine ISO:      NOT FOUND (run 'acornos download')");
+        println!("  Alpine ISO:      NOT FOUND (run 'recipe resolve deps/alpine.rhai')");
     }
 
     let apk_static = paths.apk_tools.join("sbin").join("apk.static");
     if apk_static.exists() {
         println!("  apk-tools:       FOUND at {}", apk_static.display());
     } else {
-        println!("  apk-tools:       NOT FOUND (run 'acornos download')");
-    }
-    println!();
-
-    println!("Extraction:");
-    if paths.iso_contents.exists() && paths.iso_contents.join("apks").exists() {
-        println!("  ISO contents:    EXTRACTED at {}", paths.iso_contents.display());
-    } else {
-        println!("  ISO contents:    NOT EXTRACTED (run 'acornos extract')");
+        println!("  apk-tools:       NOT FOUND (run 'recipe resolve deps/alpine.rhai')");
     }
 
     if paths.rootfs.exists() && paths.rootfs.join("bin").exists() {
         println!("  Rootfs:          CREATED at {}", paths.rootfs.display());
     } else {
-        println!("  Rootfs:          NOT CREATED (run 'acornos extract')");
+        println!("  Rootfs:          NOT CREATED (run 'recipe resolve deps/alpine.rhai')");
     }
     println!();
 
@@ -324,10 +291,8 @@ fn cmd_status() -> Result<()> {
     println!();
 
     println!("Next steps:");
-    if !paths.iso.exists() {
-        println!("  1. Run 'acornos download' to download Alpine Extended ISO");
-    } else if !paths.rootfs.exists() {
-        println!("  1. Run 'acornos extract' to extract ISO and create rootfs");
+    if !paths.rootfs.exists() {
+        println!("  1. Run 'recipe resolve deps/alpine.rhai' to download and create rootfs");
     } else if !squashfs.exists() {
         println!("  1. Run 'acornos build squashfs' to create filesystem.squashfs");
     } else if !initramfs.exists() {

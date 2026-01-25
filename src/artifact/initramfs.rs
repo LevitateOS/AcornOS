@@ -34,20 +34,20 @@ use std::path::Path;
 
 use distro_builder::process::{shell, Cmd};
 use distro_spec::acorn::{
-    BOOT_DEVICE_PROBE_ORDER,
-    BOOT_MODULES,
-    BUSYBOX_SHA256,
-    BUSYBOX_URL,
-    BUSYBOX_URL_ENV,
-    CPIO_GZIP_LEVEL,
-    INITRAMFS_BUILD_DIR,
-    INITRAMFS_DIRS,
-    INITRAMFS_LIVE_OUTPUT,
-    ISO_LABEL,
-    LIVE_OVERLAY_ISO_PATH,
-    SQUASHFS_ISO_PATH,
+    BOOT_DEVICE_PROBE_ORDER, BOOT_MODULES, CPIO_GZIP_LEVEL, INITRAMFS_BUILD_DIR, INITRAMFS_DIRS,
+    INITRAMFS_LIVE_OUTPUT, ISO_LABEL, LIVE_OVERLAY_ISO_PATH, SQUASHFS_ISO_PATH,
 };
 use leviso_deps::download::verify_sha256;
+
+// =============================================================================
+// Busybox Constants (canonical source: deps/alpine.rhai)
+// =============================================================================
+
+const BUSYBOX_URL: &str =
+    "https://busybox.net/downloads/binaries/1.35.0-x86_64-linux-musl/busybox";
+const BUSYBOX_SHA256: &str =
+    "6e123e7f3202a8c1e9b1f94d8941580a25135382b99e8d3e34fb858bba311348";
+const BUSYBOX_URL_ENV: &str = "BUSYBOX_URL";
 
 use crate::extract::ExtractPaths;
 

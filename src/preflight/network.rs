@@ -3,7 +3,10 @@
 //! Verifies that Alpine mirrors are reachable before starting downloads.
 
 use super::CheckResult;
-use distro_spec::acorn::ALPINE_EXTENDED_ISO_URL;
+
+// Canonical source: deps/alpine.rhai
+const ALPINE_EXTENDED_ISO_URL: &str =
+    "https://dl-cdn.alpinelinux.org/alpine/v3.23/releases/x86_64/alpine-extended-3.23.2-x86_64.iso";
 
 /// Check network connectivity to Alpine mirrors.
 ///
