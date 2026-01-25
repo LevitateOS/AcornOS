@@ -4,7 +4,7 @@
 > and user documentation. Keep descriptions clear, complete, and user-facing.
 
 **Version:** 1.0
-**Last Updated:** 2026-01-24
+**Last Updated:** 2026-01-25
 **Goal:** Everything a user needs to use AcornOS as their primary operating system, competing directly with Arch Linux (Alpine-based alternative to LevitateOS).
 
 ---
@@ -47,14 +47,14 @@ AcornOS is a **sibling distribution** to LevitateOS, sharing the same goals but 
 |-----|--------|--------|
 | Volatile journal/log storage | Logs may fill tmpfs | NOT CONFIGURED |
 | do-not-suspend config | Live session may sleep during install | NOT CONFIGURED |
-| SSH server (sshd/dropbear) | No remote installation/rescue | NOT IN BUILD |
-| pciutils (lspci) | Cannot identify PCI hardware | NOT IN BUILD |
-| usbutils (lsusb) | Cannot identify USB devices | NOT IN BUILD |
-| dmidecode | Cannot read BIOS/DMI info | NOT IN BUILD |
-| ethtool | Cannot diagnose NICs | NOT IN BUILD |
-| iwd | Only wpa_supplicant for WiFi | NOT IN BUILD |
-| wireless-regdb | WiFi may violate regulations | NOT IN BUILD |
-| sof-firmware | Modern laptop sound may not work | NOT IN BUILD |
+| SSH server (openssh) | No remote installation/rescue | ✅ IN BUILD |
+| pciutils (lspci) | Cannot identify PCI hardware | ✅ IN BUILD |
+| usbutils (lsusb) | Cannot identify USB devices | ✅ IN BUILD |
+| dmidecode | Cannot read BIOS/DMI info | ✅ IN BUILD |
+| ethtool | Cannot diagnose NICs | ✅ IN BUILD |
+| iwd | Only wpa_supplicant for WiFi | ✅ IN BUILD |
+| wireless-regdb | WiFi may violate regulations | ✅ IN BUILD |
+| sof-firmware | Modern laptop sound may not work | ✅ IN BUILD |
 
 ### What's Working (Verified)
 
@@ -426,12 +426,12 @@ These are known gaps in the live environment (squashfs):
 - [x] `btrfs-progs` - Btrfs filesystem tools
 
 ### Important Tools (P1)
-- [ ] `pciutils` (lspci) - identify PCI hardware
-- [ ] `usbutils` (lsusb) - identify USB devices
-- [ ] `dmidecode` - BIOS/DMI information
-- [ ] `ethtool` - NIC diagnostics and configuration
-- [ ] `iwd` - alternative WiFi daemon (often more reliable)
-- [ ] `wireless-regdb` - WiFi regulatory database
+- [x] `pciutils` (lspci) - identify PCI hardware
+- [x] `usbutils` (lsusb) - identify USB devices
+- [x] `dmidecode` - BIOS/DMI information
+- [x] `ethtool` - NIC diagnostics and configuration
+- [x] `iwd` - alternative WiFi daemon (often more reliable)
+- [x] `wireless-regdb` - WiFi regulatory database
 
 ### Live Environment Config (P1)
 - [ ] Volatile log storage (prevent tmpfs fill)
@@ -532,9 +532,9 @@ These are known gaps in the live environment (squashfs):
 - [ ] Can connect to WPA3 network
 - [ ] Can connect to WPA2-Enterprise (802.1X)
 - [ ] WiFi firmware: Intel (iwlwifi), Atheros, Realtek, Broadcom
-- [ ] **wireless-regdb** - P1: Required for legal WiFi operation
-- [ ] **iwd** - P1: Alternative WiFi daemon
-- [ ] **sof-firmware** - P1: Modern laptop sound (Intel SOF)
+- [x] **wireless-regdb** - P1: Required for legal WiFi operation
+- [x] **iwd** - P1: Alternative WiFi daemon
+- [x] **sof-firmware** - P1: Modern laptop sound (Intel SOF)
 
 ### 2.4 Network Tools
 - [ ] `ip` - interface and routing configuration (iproute2)
@@ -543,7 +543,7 @@ These are known gaps in the live environment (squashfs):
 - [ ] `curl` or `wget` - HTTP client
 - [ ] `dig` / `nslookup` - DNS queries - P2
 - [ ] `traceroute` / `tracepath` - path tracing - P2
-- [ ] **`ethtool`** - P1: NIC diagnostics
+- [x] **`ethtool`** - P1: NIC diagnostics
 
 ### 2.5 VPN Support
 - [ ] OpenVPN client
@@ -551,7 +551,7 @@ These are known gaps in the live environment (squashfs):
 - [ ] IPsec support - *optional*
 
 ### 2.6 Remote Access
-- [ ] **SSH server (sshd or dropbear)** - P1: Essential for remote installation
+- [x] **SSH server (openssh)** - P1: Essential for remote installation
 - [ ] SSH client (ssh, scp, sftp)
 - [ ] Key-based authentication works
 
@@ -565,7 +565,7 @@ These are known gaps in the live environment (squashfs):
 
 ### 3.1 Partitioning Tools
 - [ ] `fdisk` - MBR/GPT partitioning (util-linux)
-- [ ] `parted` - GPT partitioning
+- [x] `parted` - GPT partitioning
 - [ ] `lsblk` - list block devices
 - [ ] `blkid` - show UUIDs and labels
 - [ ] `wipefs` - clear filesystem signatures
@@ -573,7 +573,7 @@ These are known gaps in the live environment (squashfs):
 ### 3.2 Filesystem Support
 - [ ] ext4 (e2fsprogs: mkfs.ext4, e2fsck, tune2fs)
 - [ ] FAT32/vfat (dosfstools: mkfs.fat, fsck.fat) - required for ESP
-- [ ] XFS (xfsprogs: mkfs.xfs, xfs_repair) - P2
+- [x] XFS (xfsprogs: mkfs.xfs, xfs_repair)
 - [x] **Btrfs (btrfs-progs)** - P0 CRITICAL: Popular default
 - [ ] NTFS read/write (ntfs-3g) - P2: for Windows drives
 - [ ] exFAT (exfatprogs) - P2: for USB drives and SD cards
@@ -605,9 +605,9 @@ These are known gaps in the live environment (squashfs):
 - [ ] VirtIO: virtio_blk, virtio_scsi
 
 ### 3.7 Disk Health
-- [ ] `smartctl` (smartmontools) - SMART monitoring
-- [ ] `hdparm` - drive parameters
-- [ ] `nvme-cli` - NVMe management
+- [x] `smartctl` (smartmontools) - SMART monitoring
+- [x] `hdparm` - drive parameters
+- [x] `nvme-cli` - NVMe management
 
 ---
 
@@ -762,10 +762,10 @@ Some utilities need full versions:
 - [ ] `/proc/meminfo` readable
 
 ### 7.3 PCI/USB Detection
-- [ ] **`lspci` (pciutils)** - P1
-- [ ] **`lsusb` (usbutils)** - P1
+- [x] **`lspci` (pciutils)** - P1
+- [x] **`lsusb` (usbutils)** - P1
 - [ ] `lshw` - *optional*
-- [ ] **`dmidecode`** - P1
+- [x] **`dmidecode`** - P1
 
 ### 7.4 Input Devices
 - [ ] Keyboard works (all layouts via loadkeys)
@@ -979,12 +979,12 @@ Some software has glibc-specific assumptions:
 ### P1 - Should Have (Alpine parity)
 - [ ] Volatile log storage (prevent tmpfs fill)
 - [ ] do-not-suspend config
-- [ ] SSH server (remote installation)
-- [ ] Hardware probing: lspci, lsusb, dmidecode
-- [ ] ethtool (NIC diagnostics)
-- [ ] iwd (alternative WiFi)
-- [ ] wireless-regdb (regulatory compliance)
-- [ ] sof-firmware (Intel laptop sound)
+- [x] SSH server (openssh)
+- [x] Hardware probing: lspci, lsusb, dmidecode
+- [x] ethtool (NIC diagnostics)
+- [x] iwd (alternative WiFi)
+- [x] wireless-regdb (regulatory compliance)
+- [x] sof-firmware (Intel laptop sound)
 - [ ] ISO SHA512 checksum generation
 - [ ] Man pages
 

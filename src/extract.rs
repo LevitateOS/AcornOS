@@ -103,6 +103,19 @@ const BASE_PACKAGES: &[&str] = &[
     // Hardware info
     "pciutils",           // lspci
     "usbutils",           // lsusb
+    "dmidecode",          // BIOS/DMI info
+    "ethtool",            // NIC diagnostics
+    "smartmontools",      // SMART disk health
+    "hdparm",             // Disk parameters
+    "nvme-cli",           // NVMe management
+    // Network (P1)
+    "iwd",                // Alternative WiFi daemon
+    "wireless-regdb",     // WiFi regulatory database
+    // Audio firmware
+    "sof-firmware",       // Intel laptop audio (SOF)
+    // Filesystem tools (parity with LevitateOS)
+    "parted",             // GPT partitioning
+    "xfsprogs",           // XFS filesystem
     // SSH
     "openssh",
 ];
