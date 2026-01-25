@@ -85,6 +85,7 @@ const BASE_PACKAGES: &[&str] = &[
     "e2fsprogs",          // ext4 tools
     "dosfstools",         // FAT tools for EFI
     "util-linux",         // mount, fdisk, etc.
+    "util-linux-login",   // login binary for agetty autologin
     // Storage & Encryption (P0)
     "cryptsetup",         // LUKS disk encryption
     "lvm2",               // Logical Volume Manager

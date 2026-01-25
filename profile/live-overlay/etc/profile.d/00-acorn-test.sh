@@ -3,10 +3,13 @@
 # Activates ONLY on serial console (ttyS0) - test harness environment
 # Users on tty1 see normal behavior
 
+# DEBUG: Unconditional output to verify script is sourced
+echo "[00-acorn-test.sh] Script starting, \$-=$-"
+
 # Only run in interactive shells
 case "$-" in
     *i*) ;;
-    *) return ;;
+    *) echo "[00-acorn-test.sh] Non-interactive shell, returning"; return ;;
 esac
 
 # Detect test mode: serial console = test mode

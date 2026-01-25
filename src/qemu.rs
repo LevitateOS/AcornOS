@@ -8,10 +8,10 @@
 //! watches for success/failure patterns. This enables automated boot verification.
 
 use anyhow::{bail, Context, Result};
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::sync::mpsc;
+use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
 
 use distro_builder::process::Cmd;
@@ -22,10 +22,13 @@ use distro_spec::acorn::{
 };
 
 /// Success patterns - if we see any of these, boot succeeded.
+/// First entry (___SHELL_READY___) is the test instrumentation marker - preferred.
+/// "login:" is the only fallback (indicates getty ready for interactive login).
+/// Note: "AcornOS Live" is NOT a success pattern - it appears in /etc/issue
+/// before the shell starts, and would match too early.
 const SUCCESS_PATTERNS: &[&str] = &[
-    "login:",                    // Getty prompt - definitive success
-    "AcornOS Live",              // Our /etc/issue - getty is showing login
-    "Login as 'root'",           // Our /etc/issue line
+    "___SHELL_READY___",         // Test instrumentation - shell ready for commands
+    "login:",                    // Getty login prompt (only appears without autologin)
 ];
 
 /// Failure patterns - if we see any of these, boot failed.
@@ -235,8 +238,12 @@ pub fn run_iso(base_dir: &Path, disk_size: Option<String>) -> Result<()> {
 
 /// Test the ISO by booting headless and watching serial output.
 ///
-/// Returns Ok(()) if boot succeeds (login prompt reached).
-/// Returns Err if boot fails or times out.
+/// Returns Ok(()) if boot succeeds (login prompt reached) AND functional
+/// verification passes (UEFI boot, PID 1, runlevel).
+///
+/// NOTE: This is a SMOKE TEST for quick developer feedback.
+/// For comprehensive installation testing, use:
+///   cd testing/install-tests && cargo run -- --distro acorn
 pub fn test_iso(base_dir: &Path, timeout_secs: u64) -> Result<()> {
     let output_dir = base_dir.join("output");
     let iso_path = output_dir.join(ISO_FILENAME);
@@ -248,7 +255,22 @@ pub fn test_iso(base_dir: &Path, timeout_secs: u64) -> Result<()> {
         );
     }
 
-    println!("=== AcornOS Boot Test ===\n");
+    // =========================================================================
+    // SMOKE TEST WARNING
+    // =========================================================================
+    println!("╔═══════════════════════════════════════════════════════════════════╗");
+    println!("║                    SMOKE TEST - NOT FULL VERIFICATION             ║");
+    println!("╠═══════════════════════════════════════════════════════════════════╣");
+    println!("║ This test verifies:                                               ║");
+    println!("║   ✓ UEFI boot (checks /sys/firmware/efi)                          ║");
+    println!("║   ✓ PID 1 is init (not emergency shell)                           ║");
+    println!("║   ✓ Default runlevel reached                                      ║");
+    println!("║                                                                   ║");
+    println!("║ For FULL installation testing:                                    ║");
+    println!("║   cd testing/install-tests && cargo run -- --distro acorn         ║");
+    println!("╚═══════════════════════════════════════════════════════════════════╝");
+    println!();
+
     println!("ISO: {}", iso_path.display());
     println!("Timeout: {}s", timeout_secs);
     println!();
@@ -286,7 +308,7 @@ pub fn test_iso(base_dir: &Path, timeout_secs: u64) -> Result<()> {
     // Headless with serial console
     cmd.args(["-nographic", "-serial", "mon:stdio", "-no-reboot"]);
 
-    cmd.stdin(Stdio::null())
+    cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit());
 
@@ -294,6 +316,7 @@ pub fn test_iso(base_dir: &Path, timeout_secs: u64) -> Result<()> {
 
     let mut child = cmd.spawn().context("Failed to spawn qemu-system-x86_64")?;
     let stdout = child.stdout.take().context("Failed to capture stdout")?;
+    let stdin = child.stdin.take().context("Failed to capture stdin")?;
 
     // Spawn reader thread
     let (tx, rx) = mpsc::channel();
@@ -379,8 +402,29 @@ pub fn test_iso(base_dir: &Path, timeout_secs: u64) -> Result<()> {
                     }
                 }
 
-                // Check success patterns
-                for pattern in SUCCESS_PATTERNS {
+                // Check for shell ready marker (test instrumentation)
+                if line.contains("___SHELL_READY___") {
+                    let boot_elapsed = start.elapsed().as_secs_f64();
+                    println!();
+                    println!("═══════════════════════════════════════════════════════════");
+                    println!("SHELL READY: Test instrumentation active");
+                    println!("═══════════════════════════════════════════════════════════");
+                    println!();
+                    println!("Boot completed in {:.1}s", boot_elapsed);
+                    println!("Running functional verification...\n");
+
+                    // Run functional verification
+                    return run_functional_verification(
+                        &mut child,
+                        stdin,
+                        &rx,
+                        start,
+                        timeout,
+                    );
+                }
+
+                // Check other success patterns (fallback if test instrumentation missing)
+                for pattern in SUCCESS_PATTERNS.iter().skip(1) {  // Skip ___SHELL_READY___
                     if line.contains(pattern) {
                         let elapsed = start.elapsed().as_secs_f64();
                         let _ = child.kill();
@@ -388,13 +432,24 @@ pub fn test_iso(base_dir: &Path, timeout_secs: u64) -> Result<()> {
 
                         println!();
                         println!("═══════════════════════════════════════════════════════════");
-                        println!("BOOT SUCCESS: Matched '{}'", pattern);
+                        println!("BOOT DETECTED: Matched '{}'", pattern);
                         println!("═══════════════════════════════════════════════════════════");
                         println!();
-                        println!("Boot completed in {:.1}s", elapsed);
-                        println!("AcornOS is ready for login.");
+                        println!("WARNING: Test instrumentation NOT detected!");
+                        println!("         Functional verification SKIPPED.");
+                        println!("         Check that profile/live-overlay is included in ISO.");
+                        println!();
+                        println!("Boot detected in {:.1}s (no verification)", elapsed);
 
-                        return Ok(());
+                        // Return error since we can't verify
+                        bail!(
+                            "Boot detected but test instrumentation missing.\n\
+                             Expected: ___SHELL_READY___ marker from /etc/profile.d/00-acorn-test.sh\n\
+                             Got: '{}'\n\n\
+                             This indicates the profile/live-overlay directory was not\n\
+                             copied to the ISO. Rebuild with 'acornos iso' and try again.",
+                            pattern
+                        );
                     }
                 }
             }
@@ -408,4 +463,163 @@ pub fn test_iso(base_dir: &Path, timeout_secs: u64) -> Result<()> {
             }
         }
     }
+}
+
+/// Run functional verification commands after shell is ready.
+///
+/// Verifies:
+/// 1. UEFI boot (not -kernel bypass)
+/// 2. PID 1 is init (not emergency shell)
+/// 3. Default runlevel reached with services started
+fn run_functional_verification(
+    child: &mut Child,
+    mut stdin: ChildStdin,
+    rx: &Receiver<String>,
+    start: Instant,
+    _timeout: Duration,
+) -> Result<()> {
+    // Helper to send command and collect response
+    let send_cmd = |stdin: &mut ChildStdin, cmd: &str| -> Result<()> {
+        writeln!(stdin, "{}", cmd)?;
+        stdin.flush()?;
+        Ok(())
+    };
+
+    // Helper to wait for response with timeout
+    let wait_response = |rx: &Receiver<String>, timeout_ms: u64| -> Vec<String> {
+        let mut lines = Vec::new();
+        let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+        while Instant::now() < deadline {
+            match rx.recv_timeout(Duration::from_millis(100)) {
+                Ok(line) => {
+                    // Print verification output
+                    println!("  [verify] {}", line);
+                    lines.push(line);
+                }
+                Err(_) => continue,
+            }
+        }
+        lines
+    };
+
+    // =========================================================================
+    // Verification 1: UEFI Boot
+    // =========================================================================
+    println!("Verifying UEFI boot...");
+    // Use unique markers that don't appear in the command itself
+    send_cmd(&mut stdin, "test -d /sys/firmware/efi && echo UEFI_YES || echo UEFI_NO")?;
+    let response = wait_response(rx, 2000);
+
+    // Only check lines that start with UEFI_ (actual output, not echoed command)
+    let uefi_ok = response.iter().any(|l| l.trim() == "UEFI_YES");
+    let no_uefi = response.iter().any(|l| l.trim() == "UEFI_NO");
+
+    if no_uefi && !uefi_ok {
+        let _ = child.kill();
+        bail!(
+            "UEFI VERIFICATION FAILED\n\
+             Expected: /sys/firmware/efi directory present\n\
+             Got: Directory not found\n\n\
+             This means QEMU booted via -kernel bypass, not UEFI firmware.\n\
+             The test does not reflect real hardware boot behavior."
+        );
+    }
+    if uefi_ok {
+        println!("  ✓ UEFI boot confirmed\n");
+    }
+
+    // =========================================================================
+    // Verification 2: PID 1
+    // =========================================================================
+    println!("Verifying PID 1...");
+    send_cmd(&mut stdin, "cat /proc/1/comm")?;
+    let response = wait_response(rx, 2000);
+    let pid1_ok = response.iter().any(|l| l.contains("init"));
+
+    if !pid1_ok {
+        let _ = child.kill();
+        let pid1_name = response.iter()
+            .find(|l| !l.contains("cat") && !l.contains("___"))
+            .cloned()
+            .unwrap_or_else(|| "unknown".to_string());
+        bail!(
+            "PID 1 VERIFICATION FAILED\n\
+             Expected: init\n\
+             Got: {}\n\n\
+             The system may be in emergency shell or recovery mode.",
+            pid1_name
+        );
+    }
+    println!("  ✓ PID 1 is init\n");
+
+    // =========================================================================
+    // Verification 3: Default Runlevel
+    // =========================================================================
+    println!("Verifying default runlevel...");
+    send_cmd(&mut stdin, "rc-status default 2>/dev/null | grep -c started || echo 0")?;
+    let response = wait_response(rx, 3000);
+
+    // Look for a number in the response (count of started services)
+    let started_count: u32 = response.iter()
+        .filter_map(|l| l.trim().parse::<u32>().ok())
+        .next()
+        .unwrap_or(0);
+
+    if started_count == 0 {
+        let _ = child.kill();
+        bail!(
+            "RUNLEVEL VERIFICATION FAILED\n\
+             Expected: At least 1 service started in default runlevel\n\
+             Got: 0 services started\n\n\
+             OpenRC may not have reached the default runlevel."
+        );
+    }
+    println!("  ✓ Default runlevel reached ({} services started)\n", started_count);
+
+    // =========================================================================
+    // Verification 4: Check for crashed services
+    // =========================================================================
+    println!("Checking for crashed services...");
+    send_cmd(&mut stdin, "rc-status --crashed 2>/dev/null | grep -v '^$' | wc -l || echo 0")?;
+    let response = wait_response(rx, 2000);
+
+    let crashed_count: u32 = response.iter()
+        .filter_map(|l| l.trim().parse::<u32>().ok())
+        .next()
+        .unwrap_or(0);
+
+    if crashed_count > 0 {
+        let _ = child.kill();
+        bail!(
+            "CRASHED SERVICES DETECTED\n\
+             Found {} crashed service(s)\n\n\
+             Run 'rc-status --crashed' manually to investigate.",
+            crashed_count
+        );
+    }
+    println!("  ✓ No crashed services\n");
+
+    // =========================================================================
+    // All verifications passed
+    // =========================================================================
+    let total_elapsed = start.elapsed().as_secs_f64();
+    let _ = child.kill();
+    let _ = child.wait();
+
+    println!("╔═══════════════════════════════════════════════════════════════════╗");
+    println!("║                    SMOKE TEST PASSED                              ║");
+    println!("╠═══════════════════════════════════════════════════════════════════╣");
+    println!("║ Verified:                                                         ║");
+    println!("║   ✓ UEFI boot (not -kernel bypass)                                ║");
+    println!("║   ✓ PID 1 is init (not emergency shell)                           ║");
+    println!("║   ✓ Default runlevel reached                                      ║");
+    println!("║   ✓ No crashed services                                           ║");
+    println!("╠═══════════════════════════════════════════════════════════════════╣");
+    println!("║ Total time: {:.1}s                                                ║", total_elapsed);
+    println!("║                                                                   ║");
+    println!("║ For FULL installation testing:                                    ║");
+    println!("║   cd testing/install-tests && cargo run -- --distro acorn         ║");
+    println!("╚═══════════════════════════════════════════════════════════════════╝");
+
+    Ok(())
 }

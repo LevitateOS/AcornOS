@@ -159,8 +159,46 @@ fn create_live_overlay(output_dir: &Path) -> Result<()> {
         fs::remove_dir_all(&live_overlay)?;
     }
 
+    // =========================================================================
+    // STEP 1: Copy profile/live-overlay (test instrumentation, etc.)
+    // =========================================================================
+    // This copies files from AcornOS/profile/live-overlay/ which includes:
+    // - Test instrumentation (etc/profile.d/00-acorn-test.sh)
+    // These are copied FIRST so code-generated files below can override if needed.
+    let base_dir = output_dir.parent().unwrap_or(Path::new("."));
+    let profile_overlay = base_dir.join("profile/live-overlay");
+    if profile_overlay.exists() {
+        println!("  Copying profile/live-overlay (test instrumentation)...");
+        copy_dir_recursive(&profile_overlay, &live_overlay)?;
+    }
+
+    // =========================================================================
+    // STEP 2: Code-generated overlay files (may override profile defaults)
+    // =========================================================================
+
     // Create directory structure
     fs::create_dir_all(live_overlay.join("etc"))?;
+
+    // Create autologin script for serial console
+    // This script is called by agetty -l to act as a login program replacement
+    // agetty sets up the tty, this just needs to spawn a login shell
+    fs::create_dir_all(live_overlay.join("usr/local/bin"))?;
+    let autologin_script = r#"#!/bin/sh
+# Autologin for serial console testing
+# Called by agetty -l as the login program
+# agetty has already set up stdin/stdout/stderr on the tty
+
+echo "[autologin] Starting login shell..."
+
+# Run sh as login shell (sources /etc/profile and /etc/profile.d/*)
+# In Alpine, /bin/sh is busybox ash
+exec /bin/sh -l
+"#;
+    let autologin_path = live_overlay.join("usr/local/bin/serial-autologin");
+    fs::write(&autologin_path, autologin_script)?;
+    let mut perms = fs::metadata(&autologin_path)?.permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(&autologin_path, perms)?;
 
     // Create /etc/issue for live boot identification
     fs::write(
@@ -186,6 +224,11 @@ fn create_live_overlay(output_dir: &Path) -> Result<()> {
     // Enable serial console for automated testing
     // Create /etc/inittab with serial getty ENABLED
     // This overlays the base inittab from squashfs (which has serial commented out)
+    //
+    // For autologin on serial, we use agetty --autologin which:
+    // - Automatically logs in the specified user (root)
+    // - Spawns a login shell which sources /etc/profile and /etc/profile.d/*
+    // - This is the standard Alpine Linux approach (see wiki.alpinelinux.org/wiki/TTY_Autologin)
     let inittab_content = r#"# /etc/inittab - AcornOS Live
 # This inittab enables serial console for testing
 
@@ -201,9 +244,9 @@ tty4::respawn:/sbin/getty 38400 tty4
 tty5::respawn:/sbin/getty 38400 tty5
 tty6::respawn:/sbin/getty 38400 tty6
 
-# Serial console - ENABLED for live boot testing with AUTOLOGIN
-# -n = no login prompt, -l = login program (use /bin/sh for direct shell)
-ttyS0::respawn:/sbin/getty -n -l /bin/sh 115200 ttyS0 vt100
+# Serial console - ENABLED with AUTOLOGIN for testing
+# Uses wrapper script that redirects I/O and spawns login shell
+ttyS0::respawn:/usr/local/bin/serial-autologin
 
 # Ctrl+Alt+Del
 ::ctrlaltdel:/sbin/reboot
@@ -219,20 +262,22 @@ ttyS0::respawn:/sbin/getty -n -l /bin/sh 115200 ttyS0 vt100
     std::os::unix::fs::symlink("/etc/init.d/local", runlevels_default.join("local"))?;
 
     // Enable serial getty using OpenRC's agetty service
-    // Alpine's agetty service uses symlinks: agetty.ttyS0 -> agetty
+    // Note: agetty -l specifies the login program, but we use a wrapper
+    // that invokes ash as a login shell since /bin/login doesn't exist in Alpine
     let init_d = live_overlay.join("etc/init.d");
     fs::create_dir_all(&init_d)?;
     std::os::unix::fs::symlink("agetty", init_d.join("agetty.ttyS0"))?;
     std::os::unix::fs::symlink("/etc/init.d/agetty.ttyS0", runlevels_default.join("agetty.ttyS0"))?;
 
-    // Configure serial getty with autologin
+    // Configure serial getty with autologin using wrapper script
     let conf_d = live_overlay.join("etc/conf.d");
     fs::create_dir_all(&conf_d)?;
     let agetty_conf = r#"# Serial console configuration for live boot
 baud="115200"
 term_type="vt100"
-# Autologin as root for live session
-agetty_options="-n -l /bin/sh"
+# Use autologin wrapper that runs ash as login shell
+# -n skips login prompt, -l specifies login program
+agetty_options="-n -l /usr/local/bin/serial-autologin"
 "#;
     fs::write(conf_d.join("agetty.ttyS0"), agetty_conf)?;
 
