@@ -1,6 +1,4 @@
 #!/bin/busybox sh
-# AcornOS Tiny Initramfs
-# Mounts squashfs + overlay, then switch_root to live system
 #
 # REQUIREMENTS:
 # - Alpine kernel with squashfs, loop, overlay support
@@ -31,6 +29,14 @@ busybox mount -t sysfs sysfs /sys || busybox echo "FAILED: mount sysfs"
 
 busybox echo "Mounting devtmpfs..."
 busybox mount -t devtmpfs devtmpfs /dev || busybox echo "FAILED: mount devtmpfs"
+
+# CRITICAL: Redirect ALL output to serial console
+# The kernel's console=ttyS0 only applies to kernel messages.
+# Userspace stdout defaults to /dev/console (tty1), not serial.
+# Now that devtmpfs is mounted, /dev/ttyS0 exists.
+if [ -c /dev/ttyS0 ]; then
+    exec > /dev/ttyS0 2>&1 < /dev/ttyS0
+fi
 
 busybox echo "Basic mounts done"
 

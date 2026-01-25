@@ -184,18 +184,57 @@ fn create_live_overlay(output_dir: &Path) -> Result<()> {
     fs::set_permissions(live_overlay.join("etc/shadow"), perms)?;
 
     // Enable serial console for automated testing
-    // Create /etc/inittab addition for serial getty
-    fs::create_dir_all(live_overlay.join("etc/init.d"))?;
+    // Create /etc/inittab with serial getty ENABLED
+    // This overlays the base inittab from squashfs (which has serial commented out)
+    let inittab_content = r#"# /etc/inittab - AcornOS Live
+# This inittab enables serial console for testing
 
-    // OpenRC uses agetty via inittab or runlevel scripts
-    // Create a simple override for the inittab
-    let inittab_content = "# Serial console for live boot testing\n\
-                           ttyS0::respawn:/sbin/getty -L ttyS0 115200 vt100\n";
-    fs::create_dir_all(live_overlay.join("etc/local.d"))?;
-    fs::write(
-        live_overlay.join("etc/inittab.live"),
-        inittab_content,
-    )?;
+::sysinit:/sbin/openrc sysinit
+::sysinit:/sbin/openrc boot
+::wait:/sbin/openrc default
+
+# Virtual terminals
+tty1::respawn:/sbin/getty 38400 tty1
+tty2::respawn:/sbin/getty 38400 tty2
+tty3::respawn:/sbin/getty 38400 tty3
+tty4::respawn:/sbin/getty 38400 tty4
+tty5::respawn:/sbin/getty 38400 tty5
+tty6::respawn:/sbin/getty 38400 tty6
+
+# Serial console - ENABLED for live boot testing with AUTOLOGIN
+# -n = no login prompt, -l = login program (use /bin/sh for direct shell)
+ttyS0::respawn:/sbin/getty -n -l /bin/sh 115200 ttyS0 vt100
+
+# Ctrl+Alt+Del
+::ctrlaltdel:/sbin/reboot
+
+# Shutdown
+::shutdown:/sbin/openrc shutdown
+"#;
+    fs::write(live_overlay.join("etc/inittab"), inittab_content)?;
+
+    // Enable services in default runlevel
+    let runlevels_default = live_overlay.join("etc/runlevels/default");
+    fs::create_dir_all(&runlevels_default)?;
+    std::os::unix::fs::symlink("/etc/init.d/local", runlevels_default.join("local"))?;
+
+    // Enable serial getty using OpenRC's agetty service
+    // Alpine's agetty service uses symlinks: agetty.ttyS0 -> agetty
+    let init_d = live_overlay.join("etc/init.d");
+    fs::create_dir_all(&init_d)?;
+    std::os::unix::fs::symlink("agetty", init_d.join("agetty.ttyS0"))?;
+    std::os::unix::fs::symlink("/etc/init.d/agetty.ttyS0", runlevels_default.join("agetty.ttyS0"))?;
+
+    // Configure serial getty with autologin
+    let conf_d = live_overlay.join("etc/conf.d");
+    fs::create_dir_all(&conf_d)?;
+    let agetty_conf = r#"# Serial console configuration for live boot
+baud="115200"
+term_type="vt100"
+# Autologin as root for live session
+agetty_options="-n -l /bin/sh"
+"#;
+    fs::write(conf_d.join("agetty.ttyS0"), agetty_conf)?;
 
     println!("  Live overlay created at {}", live_overlay.display());
     Ok(())
@@ -246,15 +285,20 @@ fn copy_iso_artifacts(paths: &IsoPaths) -> Result<()> {
     Ok(())
 }
 
-/// Recursively copy a directory.
+/// Recursively copy a directory, preserving symlinks.
 fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
     fs::create_dir_all(dst)?;
     for entry in fs::read_dir(src)? {
         let entry = entry?;
         let src_path = entry.path();
         let dst_path = dst.join(entry.file_name());
+        let file_type = entry.file_type()?;
 
-        if src_path.is_dir() {
+        if file_type.is_symlink() {
+            // Preserve symlinks (important for runlevel service links)
+            let target = fs::read_link(&src_path)?;
+            std::os::unix::fs::symlink(&target, &dst_path)?;
+        } else if file_type.is_dir() {
             copy_dir_recursive(&src_path, &dst_path)?;
         } else {
             fs::copy(&src_path, &dst_path)?;

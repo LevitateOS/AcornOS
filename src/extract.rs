@@ -98,6 +98,11 @@ const BASE_PACKAGES: &[&str] = &[
     "bash",               // bash shell (not just ash)
     "busybox",
     "coreutils",
+    // Text processing (required by OpenRC scripts)
+    "grep",               // GNU grep - needed by OpenRC init scripts
+    "sed",                // GNU sed - needed by many init scripts
+    "gawk",               // GNU awk - needed by some services
+    "findutils",          // find, xargs - needed by various scripts
     // Text editor
     "vim",
     // Hardware info

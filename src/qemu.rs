@@ -24,12 +24,8 @@ use distro_spec::acorn::{
 /// Success patterns - if we see any of these, boot succeeded.
 const SUCCESS_PATTERNS: &[&str] = &[
     "login:",                    // Getty prompt - definitive success
-    "Welcome to Alpine Linux",   // Alpine welcome message
-    "Welcome to AcornOS",        // AcornOS welcome message
-    "openrc-init",               // OpenRC init started
-    "Switching root",            // Our init script switch_root message
-    "OpenRC",                    // OpenRC starting services
-    "rc-status",                 // OpenRC status output
+    "AcornOS Live",              // Our /etc/issue - getty is showing login
+    "Login as 'root'",           // Our /etc/issue line
 ];
 
 /// Failure patterns - if we see any of these, boot failed.
