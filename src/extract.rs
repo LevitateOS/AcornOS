@@ -34,9 +34,9 @@ use std::path::{Path, PathBuf};
 
 use distro_builder::process::Cmd;
 use distro_spec::acorn::{
-    ALPINE_EXTENDED_ISO_FILENAME, ALPINE_EXTENDED_ISO_SHA256_URL, ALPINE_EXTENDED_ISO_SIZE,
-    ALPINE_EXTENDED_ISO_URL, ALPINE_ISO_PATH_ENV, ALPINE_VERSION, APK_TOOLS_STATIC_FILENAME,
-    APK_TOOLS_STATIC_URL,
+    all_live_packages, ALPINE_EXTENDED_ISO_FILENAME, ALPINE_EXTENDED_ISO_SHA256_URL,
+    ALPINE_EXTENDED_ISO_SIZE, ALPINE_EXTENDED_ISO_URL, ALPINE_ISO_PATH_ENV, ALPINE_KEYS,
+    ALPINE_VERSION, APK_TOOLS_STATIC_FILENAME, APK_TOOLS_STATIC_SHA256, APK_TOOLS_STATIC_URL,
 };
 use leviso_deps::download::{http, verify_sha256, DownloadOptions};
 
@@ -61,70 +61,6 @@ pub mod repos {
     }
 }
 
-/// Base packages to install when creating the rootfs.
-/// These are the minimal set needed for a bootable system.
-const BASE_PACKAGES: &[&str] = &[
-    // Core Alpine base
-    "alpine-base",
-    // Init system
-    "openrc",
-    "openrc-init",
-    // Hardware support
-    "linux-lts",          // LTS kernel
-    "linux-firmware",     // Device firmware
-    "intel-ucode",        // Intel microcode
-    "amd-ucode",          // AMD microcode
-    // Device management (P0)
-    "eudev",              // udev-compatible device manager
-    "eudev-openrc",       // OpenRC service for eudev
-    // Boot
-    "grub",
-    "grub-efi",
-    "efibootmgr",
-    // Filesystem
-    "e2fsprogs",          // ext4 tools
-    "dosfstools",         // FAT tools for EFI
-    "util-linux",         // mount, fdisk, etc.
-    "util-linux-login",   // login binary for agetty autologin
-    // Storage & Encryption (P0)
-    "cryptsetup",         // LUKS disk encryption
-    "lvm2",               // Logical Volume Manager
-    "btrfs-progs",        // Btrfs filesystem tools
-    "device-mapper",      // Required by cryptsetup/lvm2
-    // Network
-    "dhcpcd",
-    "iproute2",
-    "iputils",            // ping
-    // Shell and utilities
-    "bash",               // bash shell (not just ash)
-    "busybox",
-    "coreutils",
-    // Text processing (required by OpenRC scripts)
-    "grep",               // GNU grep - needed by OpenRC init scripts
-    "sed",                // GNU sed - needed by many init scripts
-    "gawk",               // GNU awk - needed by some services
-    "findutils",          // find, xargs - needed by various scripts
-    // Text editor
-    "vim",
-    // Hardware info
-    "pciutils",           // lspci
-    "usbutils",           // lsusb
-    "dmidecode",          // BIOS/DMI info
-    "ethtool",            // NIC diagnostics
-    "smartmontools",      // SMART disk health
-    "hdparm",             // Disk parameters
-    "nvme-cli",           // NVMe management
-    // Network (P1)
-    "iwd",                // Alternative WiFi daemon
-    "wireless-regdb",     // WiFi regulatory database
-    // Audio firmware
-    "sof-firmware",       // Intel laptop audio (SOF)
-    // Filesystem tools (parity with LevitateOS)
-    "parted",             // GPT partitioning
-    "xfsprogs",           // XFS filesystem
-    // SSH
-    "openssh",
-];
 
 /// Paths used during download and extraction.
 pub struct ExtractPaths {
@@ -298,6 +234,11 @@ pub async fn download_apk_tools(base_dir: &Path) -> Result<PathBuf> {
         http(APK_TOOLS_STATIC_URL, &apk_file, &options)
             .await
             .context("Failed to download apk-tools-static")?;
+
+        // Verify checksum
+        println!("Verifying checksum...");
+        verify_sha256(&apk_file, APK_TOOLS_STATIC_SHA256, false)
+            .context("apk-tools-static checksum verification failed")?;
     }
 
     // Extract the APK (it's a tarball)
@@ -357,9 +298,19 @@ pub fn create_rootfs(base_dir: &Path) -> Result<()> {
     fs::create_dir_all(&paths.rootfs)?;
 
     // Create required directories for apk
-    for dir in ["etc/apk", "var/cache/apk"] {
+    for dir in ["etc/apk", "var/cache/apk", "etc/apk/keys"] {
         fs::create_dir_all(paths.rootfs.join(dir))?;
     }
+
+    // Install Alpine signing keys BEFORE running apk
+    // This enables signature verification without --allow-untrusted
+    println!("Installing Alpine signing keys...");
+    let keys_dir = paths.rootfs.join("etc/apk/keys");
+    for (filename, content) in ALPINE_KEYS {
+        let key_path = keys_dir.join(filename);
+        fs::write(&key_path, content)?;
+    }
+    println!("  Installed {} signing keys", ALPINE_KEYS.len());
 
     // Set up repository to use local ISO packages
     let repo_path = format!("{}/apks", paths.iso_contents.display());
@@ -372,17 +323,18 @@ pub fn create_rootfs(base_dir: &Path) -> Result<()> {
     fs::write(paths.rootfs.join("etc/apk/repositories"), &repos_content)?;
 
     // Initialize the rootfs with base packages
-    println!("Installing base packages to rootfs...");
+    let packages = all_live_packages();
+    println!("Installing packages to rootfs...");
     println!("  Rootfs: {}", paths.rootfs.display());
-    println!("  Packages: {} base packages", BASE_PACKAGES.len());
+    println!("  Packages: {} packages (all tiers)", packages.len());
 
     let mut cmd = Cmd::new(apk_static.to_string_lossy().as_ref());
     cmd = cmd
         .args(["--root"])
         .arg_path(&paths.rootfs)
-        .args(["--initdb", "--no-progress", "--allow-untrusted", "add"]);
+        .args(["--initdb", "--no-progress", "add"]);
 
-    for pkg in BASE_PACKAGES {
+    for pkg in &packages {
         cmd = cmd.arg(*pkg);
     }
 

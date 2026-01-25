@@ -34,8 +34,9 @@ use std::path::Path;
 
 use distro_builder::process::{shell, Cmd};
 use distro_spec::acorn::{
-    BOOT_MODULES,
     BOOT_DEVICE_PROBE_ORDER,
+    BOOT_MODULES,
+    BUSYBOX_SHA256,
     BUSYBOX_URL,
     BUSYBOX_URL_ENV,
     CPIO_GZIP_LEVEL,
@@ -46,6 +47,7 @@ use distro_spec::acorn::{
     LIVE_OVERLAY_ISO_PATH,
     SQUASHFS_ISO_PATH,
 };
+use leviso_deps::download::verify_sha256;
 
 use crate::extract::ExtractPaths;
 
@@ -137,6 +139,7 @@ fn copy_busybox(base_dir: &Path, initramfs_root: &Path) -> Result<()> {
     // Download if not cached
     if !busybox_cache.exists() {
         let url = busybox_url();
+        let is_default_url = env::var(BUSYBOX_URL_ENV).is_err();
         println!("  Downloading static busybox from {}", url);
         fs::create_dir_all(&downloads_dir)?;
 
@@ -146,6 +149,15 @@ fn copy_busybox(base_dir: &Path, initramfs_root: &Path) -> Result<()> {
             .args(["--progress-bar", &url])
             .error_msg("Failed to download busybox. Install: sudo dnf install curl")
             .run_interactive()?;
+
+        // Verify checksum only for default URL (custom URLs may have different checksums)
+        if is_default_url {
+            println!("  Verifying checksum...");
+            verify_sha256(&busybox_cache, BUSYBOX_SHA256, false)
+                .context("Busybox checksum verification failed")?;
+        } else {
+            println!("  Skipping checksum (custom URL)");
+        }
     }
 
     // Copy to initramfs
