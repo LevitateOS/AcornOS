@@ -229,8 +229,10 @@ exec /bin/sh -l
     // - Automatically logs in the specified user (root)
     // - Spawns a login shell which sources /etc/profile and /etc/profile.d/*
     // - This is the standard Alpine Linux approach (see wiki.alpinelinux.org/wiki/TTY_Autologin)
+    // NOTE: Serial console (ttyS0) is NOT in inittab - it's managed by the
+    // agetty.ttyS0 OpenRC service instead. This avoids duplicate respawn
+    // attempts between inittab and OpenRC.
     let inittab_content = r#"# /etc/inittab - AcornOS Live
-# This inittab enables serial console for testing
 
 ::sysinit:/sbin/openrc sysinit
 ::sysinit:/sbin/openrc boot
@@ -244,9 +246,8 @@ tty4::respawn:/sbin/getty 38400 tty4
 tty5::respawn:/sbin/getty 38400 tty5
 tty6::respawn:/sbin/getty 38400 tty6
 
-# Serial console - ENABLED with AUTOLOGIN for testing
-# Uses wrapper script that redirects I/O and spawns login shell
-ttyS0::respawn:/usr/local/bin/serial-autologin
+# NOTE: ttyS0 is managed by agetty.ttyS0 OpenRC service (see /etc/conf.d/agetty.ttyS0)
+# Do NOT add a ttyS0 entry here - it would conflict with the service
 
 # Ctrl+Alt+Del
 ::ctrlaltdel:/sbin/reboot

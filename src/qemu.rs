@@ -419,7 +419,6 @@ pub fn test_iso(base_dir: &Path, timeout_secs: u64) -> Result<()> {
                         stdin,
                         &rx,
                         start,
-                        timeout,
                     );
                 }
 
@@ -476,7 +475,6 @@ fn run_functional_verification(
     mut stdin: ChildStdin,
     rx: &Receiver<String>,
     start: Instant,
-    _timeout: Duration,
 ) -> Result<()> {
     // Helper to send command and collect response
     let send_cmd = |stdin: &mut ChildStdin, cmd: &str| -> Result<()> {
@@ -485,7 +483,10 @@ fn run_functional_verification(
         Ok(())
     };
 
-    // Helper to wait for response with timeout
+    // Helper to wait for response with timeout.
+    // Note: We can't return early on ___PROMPT___ because serial console output
+    // arrives in unpredictable chunks and UEFI_YES/NO might be on the same line
+    // as the prompt or arrive after it due to buffering.
     let wait_response = |rx: &Receiver<String>, timeout_ms: u64| -> Vec<String> {
         let mut lines = Vec::new();
         let deadline = Instant::now() + Duration::from_millis(timeout_ms);
@@ -510,7 +511,7 @@ fn run_functional_verification(
     send_cmd(&mut stdin, "test -d /sys/firmware/efi && echo UEFI_YES || echo UEFI_NO")?;
     let response = wait_response(rx, 2000);
 
-    // Only check lines that start with UEFI_ (actual output, not echoed command)
+    // Only check lines that are exactly UEFI_YES or UEFI_NO (not echoed command)
     let uefi_ok = response.iter().any(|l| l.trim() == "UEFI_YES");
     let no_uefi = response.iter().any(|l| l.trim() == "UEFI_NO");
 
@@ -524,9 +525,18 @@ fn run_functional_verification(
              The test does not reflect real hardware boot behavior."
         );
     }
-    if uefi_ok {
-        println!("  ✓ UEFI boot confirmed\n");
+    if !uefi_ok && !no_uefi {
+        // Neither marker found - inconclusive result
+        let _ = child.kill();
+        bail!(
+            "UEFI VERIFICATION INCONCLUSIVE\n\
+             Expected: UEFI_YES or UEFI_NO response\n\
+             Got: {:?}\n\n\
+             Serial I/O may be broken or command timed out.",
+            response
+        );
     }
+    println!("  ✓ UEFI boot confirmed\n");
 
     // =========================================================================
     // Verification 2: PID 1
@@ -580,7 +590,8 @@ fn run_functional_verification(
     // Verification 4: Check for crashed services
     // =========================================================================
     println!("Checking for crashed services...");
-    send_cmd(&mut stdin, "rc-status --crashed 2>/dev/null | grep -v '^$' | wc -l || echo 0")?;
+    // Use tail -n +2 to skip the "Crashed services:" header line, then count non-empty lines
+    send_cmd(&mut stdin, "rc-status --crashed 2>/dev/null | tail -n +2 | grep -c . || echo 0")?;
     let response = wait_response(rx, 2000);
 
     let crashed_count: u32 = response.iter()
