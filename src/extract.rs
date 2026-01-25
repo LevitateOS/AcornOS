@@ -74,6 +74,9 @@ const BASE_PACKAGES: &[&str] = &[
     "linux-firmware",     // Device firmware
     "intel-ucode",        // Intel microcode
     "amd-ucode",          // AMD microcode
+    // Device management (P0)
+    "eudev",              // udev-compatible device manager
+    "eudev-openrc",       // OpenRC service for eudev
     // Boot
     "grub",
     "grub-efi",
@@ -82,6 +85,11 @@ const BASE_PACKAGES: &[&str] = &[
     "e2fsprogs",          // ext4 tools
     "dosfstools",         // FAT tools for EFI
     "util-linux",         // mount, fdisk, etc.
+    // Storage & Encryption (P0)
+    "cryptsetup",         // LUKS disk encryption
+    "lvm2",               // Logical Volume Manager
+    "btrfs-progs",        // Btrfs filesystem tools
+    "device-mapper",      // Required by cryptsetup/lvm2
     // Network
     "dhcpcd",
     "iproute2",

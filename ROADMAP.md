@@ -35,11 +35,11 @@ AcornOS is a **sibling distribution** to LevitateOS, sharing the same goals but 
 
 | Gap | Impact | Status |
 |-----|--------|--------|
-| **Intel/AMD microcode** | CPU bugs, security vulnerabilities | NOT IN BUILD |
-| **cryptsetup (LUKS)** | No encrypted disk support | NOT IN BUILD |
-| **lvm2** | No LVM support | NOT IN BUILD |
-| **btrfs-progs** | No Btrfs support | NOT IN BUILD |
-| **eudev or mdev** | No device management | NOT DECIDED |
+| **Intel/AMD microcode** | CPU bugs, security vulnerabilities | ✅ IN BUILD |
+| **cryptsetup (LUKS)** | No encrypted disk support | ✅ IN BUILD |
+| **lvm2** | No LVM support | ✅ IN BUILD |
+| **btrfs-progs** | No Btrfs support | ✅ IN BUILD |
+| **eudev or mdev** | No device management | ✅ eudev IN BUILD |
 
 ### P1 - Important Gaps
 
@@ -421,9 +421,9 @@ menuentry "AcornOS Live" {
 These are known gaps in the live environment (squashfs):
 
 ### Critical Tools (P0)
-- [ ] `cryptsetup` - LUKS disk encryption
-- [ ] `lvm2` - Logical Volume Manager (pvcreate, vgcreate, lvcreate)
-- [ ] `btrfs-progs` - Btrfs filesystem tools
+- [x] `cryptsetup` - LUKS disk encryption
+- [x] `lvm2` - Logical Volume Manager (pvcreate, vgcreate, lvcreate)
+- [x] `btrfs-progs` - Btrfs filesystem tools
 
 ### Important Tools (P1)
 - [ ] `pciutils` (lspci) - identify PCI hardware
@@ -574,19 +574,19 @@ These are known gaps in the live environment (squashfs):
 - [ ] ext4 (e2fsprogs: mkfs.ext4, e2fsck, tune2fs)
 - [ ] FAT32/vfat (dosfstools: mkfs.fat, fsck.fat) - required for ESP
 - [ ] XFS (xfsprogs: mkfs.xfs, xfs_repair) - P2
-- [ ] **Btrfs (btrfs-progs)** - P0 CRITICAL: Popular default
+- [x] **Btrfs (btrfs-progs)** - P0 CRITICAL: Popular default
 - [ ] NTFS read/write (ntfs-3g) - P2: for Windows drives
 - [ ] exFAT (exfatprogs) - P2: for USB drives and SD cards
 - [ ] ISO9660 (kernel module)
 - [ ] squashfs (kernel module + squashfs-tools)
 
 ### 3.3 LVM & RAID
-- [ ] **LVM2 (pvcreate, vgcreate, lvcreate)** - P0 CRITICAL
+- [x] **LVM2 (pvcreate, vgcreate, lvcreate)** - P0 CRITICAL
 - [ ] mdadm for software RAID - P2
 - [ ] dmraid for fake RAID - P3
 
 ### 3.4 Encryption
-- [ ] **LUKS encryption (cryptsetup)** - P0 CRITICAL
+- [x] **LUKS encryption (cryptsetup)** - P0 CRITICAL
 - [ ] Encrypted root partition support
 - [ ] crypttab for automatic unlock
 
@@ -750,8 +750,8 @@ Some utilities need full versions:
 ## 7. HARDWARE SUPPORT
 
 ### 7.1 CPU
-- [ ] **Intel microcode (intel-ucode)** - P0 CRITICAL
-- [ ] **AMD microcode (amd-ucode)** - P0 CRITICAL
+- [x] **Intel microcode (intel-ucode)** - P0 CRITICAL
+- [x] **AMD microcode (amd-ucode)** - P0 CRITICAL
 - [ ] CPU frequency scaling (cpupower) - P2
 - [ ] Temperature monitoring (lm_sensors) - P2
 
@@ -970,11 +970,11 @@ Some software has glibc-specific assumptions:
 - [ ] User management + sudo/doas
 - [ ] Core utilities (busybox)
 - [ ] OpenRC working
-- [ ] Device management (eudev or mdev)
-- [ ] **Intel/AMD microcode** - CPU security/stability
-- [ ] **cryptsetup (LUKS)** - disk encryption
-- [ ] **lvm2** - Logical Volume Manager
-- [ ] **btrfs-progs** - Btrfs filesystem support
+- [x] Device management (eudev or mdev) - eudev added
+- [x] **Intel/AMD microcode** - CPU security/stability
+- [x] **cryptsetup (LUKS)** - disk encryption
+- [x] **lvm2** - Logical Volume Manager
+- [x] **btrfs-progs** - Btrfs filesystem support
 
 ### P1 - Should Have (Alpine parity)
 - [ ] Volatile log storage (prevent tmpfs fill)
