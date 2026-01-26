@@ -10,30 +10,29 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+// Use shared infrastructure from distro-builder
+use distro_builder::artifact::filesystem::copy_dir_recursive;
+use distro_builder::artifact::iso_utils::{
+    create_efi_dirs_in_fat, create_fat16_image, generate_iso_checksum, mcopy_to_fat, run_xorriso,
+    setup_iso_structure,
+};
 use distro_builder::process::Cmd;
 use distro_spec::acorn::{
     // Identity
-    ISO_LABEL, ISO_FILENAME, OS_NAME,
+    ISO_FILENAME, ISO_LABEL, OS_NAME,
     // Squashfs
-    SQUASHFS_NAME, SQUASHFS_ISO_PATH,
+    SQUASHFS_ISO_PATH, SQUASHFS_NAME,
     // Boot files
-    KERNEL_ISO_PATH, INITRAMFS_LIVE_ISO_PATH,
-    INITRAMFS_LIVE_OUTPUT,
+    INITRAMFS_LIVE_ISO_PATH, INITRAMFS_LIVE_OUTPUT, KERNEL_ISO_PATH,
     // ISO structure
-    ISO_BOOT_DIR, ISO_LIVE_DIR, ISO_EFI_DIR,
-    LIVE_OVERLAY_ISO_PATH,
+    ISO_EFI_DIR, LIVE_OVERLAY_ISO_PATH,
     // EFI
-    EFIBOOT_FILENAME, EFIBOOT_SIZE_MB,
-    EFI_BOOTLOADER,
+    EFIBOOT_FILENAME, EFIBOOT_SIZE_MB, EFI_BOOTLOADER,
     // Console
     SERIAL_CONSOLE, VGA_CONSOLE,
     // Checksum
-    ISO_CHECKSUM_SUFFIX, SHA512_SEPARATOR,
-    // xorriso
-    XORRISO_PARTITION_OFFSET, XORRISO_FS_FLAGS,
+    ISO_CHECKSUM_SUFFIX,
 };
-
-use crate::extract::ExtractPaths;
 
 /// Get ISO volume label from environment or use default.
 fn iso_label() -> String {
@@ -47,21 +46,18 @@ struct IsoPaths {
     initramfs_live: PathBuf,
     iso_output: PathBuf,
     iso_root: PathBuf,
-    rootfs: PathBuf,
     /// Custom-built kernel at output/staging/boot/vmlinuz
     kernel: PathBuf,
 }
 
 impl IsoPaths {
     fn new(base_dir: &Path) -> Self {
-        let paths = ExtractPaths::new(base_dir);
         let output_dir = base_dir.join("output");
         Self {
             squashfs: output_dir.join(SQUASHFS_NAME),
             initramfs_live: output_dir.join(INITRAMFS_LIVE_OUTPUT),
             iso_output: output_dir.join(ISO_FILENAME),
             iso_root: output_dir.join("iso-root"),
-            rootfs: paths.rootfs,
             // Custom kernel from our build (stolen from leviso or built ourselves)
             kernel: output_dir.join("staging/boot/vmlinuz"),
             output_dir,
@@ -93,8 +89,8 @@ pub fn create_squashfs_iso(base_dir: &Path) -> Result<()> {
     // Stage 2: Create live overlay (autologin, serial console, empty root password)
     create_live_overlay(&paths.output_dir)?;
 
-    // Stage 3: Set up ISO directory structure
-    setup_iso_structure(&paths)?;
+    // Stage 3: Set up ISO directory structure (using shared infrastructure)
+    setup_iso_structure(&paths.iso_root)?;
 
     // Stage 4: Copy boot files and artifacts
     copy_iso_artifacts(&paths)?;
@@ -102,12 +98,13 @@ pub fn create_squashfs_iso(base_dir: &Path) -> Result<()> {
     // Stage 5: Set up UEFI boot
     setup_uefi_boot(&paths)?;
 
-    // Stage 6: Create the ISO to a temporary file
+    // Stage 6: Create the ISO to a temporary file (using shared infrastructure)
     let temp_iso = paths.output_dir.join(format!("{}.tmp", ISO_FILENAME));
-    run_xorriso(&paths, &temp_iso)?;
+    let label = iso_label();
+    run_xorriso(&paths.iso_root, &temp_iso, &label, EFIBOOT_FILENAME)?;
 
-    // Stage 7: Generate checksum for the temporary ISO
-    generate_iso_checksum(&temp_iso)?;
+    // Stage 7: Generate checksum for the temporary ISO (using shared infrastructure)
+    let _checksum_path = generate_iso_checksum(&temp_iso)?;
 
     // Atomic rename to final destination
     fs::rename(&temp_iso, &paths.iso_output)?;
@@ -404,19 +401,6 @@ IdleAction=ignore
     Ok(())
 }
 
-/// Stage 3: Create ISO directory structure.
-fn setup_iso_structure(paths: &IsoPaths) -> Result<()> {
-    if paths.iso_root.exists() {
-        fs::remove_dir_all(&paths.iso_root)?;
-    }
-
-    fs::create_dir_all(paths.iso_root.join(ISO_BOOT_DIR))?;
-    fs::create_dir_all(paths.iso_root.join(ISO_LIVE_DIR))?;
-    fs::create_dir_all(paths.iso_root.join(ISO_EFI_DIR))?;
-
-    Ok(())
-}
-
 /// Stage 4: Copy kernel, initramfs, squashfs, and live overlay to ISO.
 fn copy_iso_artifacts(paths: &IsoPaths) -> Result<()> {
     // Copy custom-built kernel (from output/staging/boot/vmlinuz)
@@ -445,40 +429,6 @@ fn copy_iso_artifacts(paths: &IsoPaths) -> Result<()> {
         );
     }
 
-    Ok(())
-}
-
-/// Recursively copy a directory, preserving symlinks.
-fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
-    fs::create_dir_all(dst)
-        .with_context(|| format!("Failed to create directory {}", dst.display()))?;
-    for entry in fs::read_dir(src)
-        .with_context(|| format!("Failed to read directory {}", src.display()))?
-    {
-        let entry = entry?;
-        let src_path = entry.path();
-        let dst_path = dst.join(entry.file_name());
-        let file_type = entry.file_type()?;
-
-        if file_type.is_symlink() {
-            // Preserve symlinks (important for runlevel service links)
-            // Remove existing file/symlink if present
-            // Use symlink_metadata to detect broken symlinks (exists() follows the link)
-            if dst_path.symlink_metadata().is_ok() {
-                fs::remove_file(&dst_path)
-                    .with_context(|| format!("Failed to remove existing symlink {}", dst_path.display()))?;
-            }
-            let target = fs::read_link(&src_path)
-                .with_context(|| format!("Failed to read symlink {}", src_path.display()))?;
-            std::os::unix::fs::symlink(&target, &dst_path)
-                .with_context(|| format!("Failed to create symlink {} -> {}", dst_path.display(), target.display()))?;
-        } else if file_type.is_dir() {
-            copy_dir_recursive(&src_path, &dst_path)?;
-        } else {
-            fs::copy(&src_path, &dst_path)
-                .with_context(|| format!("Failed to copy {} -> {}", src_path.display(), dst_path.display()))?;
-        }
-    }
     Ok(())
 }
 
@@ -581,62 +531,6 @@ menuentry '{} (Debug)' {{
     Ok(())
 }
 
-/// Stage 6: Run xorriso to create the final ISO.
-fn run_xorriso(paths: &IsoPaths, output: &Path) -> Result<()> {
-    println!("Creating UEFI bootable ISO with xorriso...");
-    let label = iso_label();
-
-    Cmd::new("xorriso")
-        .args(["-as", "mkisofs", "-o"])
-        .arg_path(output)
-        .args(["-V", &label])
-        .args(["-partition_offset", &XORRISO_PARTITION_OFFSET.to_string()])
-        .args(XORRISO_FS_FLAGS)
-        .args(["-e", EFIBOOT_FILENAME, "-no-emul-boot", "-isohybrid-gpt-basdat"])
-        .arg_path(&paths.iso_root)
-        .error_msg("xorriso failed. Install: sudo dnf install xorriso")
-        .run()?;
-
-    Ok(())
-}
-
-/// Stage 7: Generate SHA512 checksum for download verification.
-fn generate_iso_checksum(iso_path: &Path) -> Result<()> {
-    println!("Generating SHA512 checksum...");
-
-    let result = Cmd::new("sha512sum")
-        .arg_path(iso_path)
-        .error_msg("sha512sum failed")
-        .run()?;
-
-    let hash = result
-        .stdout
-        .split_whitespace()
-        .next()
-        .context("Could not parse sha512sum output")?;
-
-    let filename = iso_path
-        .file_name()
-        .context("Could not get ISO filename")?
-        .to_string_lossy();
-
-    let checksum_content = format!("{}{}{}\n", hash, SHA512_SEPARATOR, filename);
-
-    let checksum_path = iso_path.with_extension(ISO_CHECKSUM_SUFFIX.trim_start_matches('.'));
-    fs::write(&checksum_path, &checksum_content)?;
-
-    if hash.len() >= 16 {
-        println!(
-            "  SHA512: {}...{}",
-            &hash[..8],
-            &hash[hash.len() - 8..]
-        );
-    }
-    println!("  Wrote: {}", checksum_path.display());
-
-    Ok(())
-}
-
 /// Print summary after ISO creation.
 fn print_iso_summary(iso_output: &Path) {
     println!("\n=== AcornOS ISO Created ===");
@@ -654,50 +548,23 @@ fn print_iso_summary(iso_output: &Path) {
     println!("  cargo run -- run");
 }
 
-/// Create a FAT16 image containing EFI boot files.
+/// Create a FAT16 image containing EFI boot files (using shared infrastructure).
 fn create_efi_boot_image(iso_root: &Path, efiboot_img: &Path) -> Result<()> {
-    let efiboot_str = efiboot_img.to_string_lossy();
+    // Use shared utilities from distro-builder
+    create_fat16_image(efiboot_img, EFIBOOT_SIZE_MB)?;
+    create_efi_dirs_in_fat(efiboot_img)?;
 
-    // Create empty file
-    Cmd::new("dd")
-        .args(["if=/dev/zero", &format!("of={}", efiboot_str)])
-        .args(["bs=1M", &format!("count={}", EFIBOOT_SIZE_MB)])
-        .error_msg("Failed to create efiboot.img with dd")
-        .run()?;
-
-    // Format as FAT16
-    Cmd::new("mkfs.fat")
-        .args(["-F", "16"])
-        .arg_path(efiboot_img)
-        .error_msg("mkfs.fat failed. Install: sudo dnf install dosfstools")
-        .run()?;
-
-    // Create EFI/BOOT directory structure using mtools
-    Cmd::new("mmd")
-        .args(["-i", &efiboot_str, "::EFI"])
-        .error_msg("mmd failed. Install: sudo dnf install mtools")
-        .run()?;
-
-    Cmd::new("mmd")
-        .args(["-i", &efiboot_str, "::EFI/BOOT"])
-        .error_msg("mmd failed to create ::EFI/BOOT directory")
-        .run()?;
-
-    // Copy EFI bootloader
-    Cmd::new("mcopy")
-        .args(["-i", &efiboot_str])
-        .arg_path(&iso_root.join(ISO_EFI_DIR).join(EFI_BOOTLOADER))
-        .arg("::EFI/BOOT/")
-        .error_msg("mcopy failed to copy BOOTX64.EFI")
-        .run()?;
-
-    // Copy grub.cfg
-    Cmd::new("mcopy")
-        .args(["-i", &efiboot_str])
-        .arg_path(&iso_root.join(ISO_EFI_DIR).join("grub.cfg"))
-        .arg("::EFI/BOOT/")
-        .error_msg("mcopy failed to copy grub.cfg")
-        .run()?;
+    // Copy EFI bootloader and grub.cfg
+    mcopy_to_fat(
+        efiboot_img,
+        &iso_root.join(ISO_EFI_DIR).join(EFI_BOOTLOADER),
+        "::EFI/BOOT/",
+    )?;
+    mcopy_to_fat(
+        efiboot_img,
+        &iso_root.join(ISO_EFI_DIR).join("grub.cfg"),
+        "::EFI/BOOT/",
+    )?;
 
     // Copy efiboot.img into iso-root for xorriso
     fs::copy(efiboot_img, iso_root.join(EFIBOOT_FILENAME))?;

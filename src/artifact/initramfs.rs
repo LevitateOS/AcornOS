@@ -34,7 +34,8 @@ use std::io::Read;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
-use distro_builder::process::{shell, Cmd};
+use distro_builder::artifact::cpio::build_cpio;
+use distro_builder::process::Cmd;
 use distro_spec::acorn::{
     BOOT_DEVICE_PROBE_ORDER, BOOT_MODULES, CPIO_GZIP_LEVEL, INITRAMFS_BUILD_DIR, INITRAMFS_DIRS,
     INITRAMFS_LIVE_OUTPUT, ISO_LABEL, LIVE_OVERLAY_ISO_PATH, SQUASHFS_ISO_PATH,
@@ -114,9 +115,9 @@ pub fn build_tiny_initramfs(base_dir: &Path) -> Result<()> {
     // Create init script from template
     create_init_script(base_dir, &initramfs_root)?;
 
-    // Build cpio archive to a temporary file
+    // Build cpio archive to a temporary file (using shared infrastructure)
     let temp_cpio = output_dir.join(format!("{}.tmp", INITRAMFS_LIVE_OUTPUT));
-    build_cpio(&initramfs_root, &temp_cpio)?;
+    build_cpio(&initramfs_root, &temp_cpio, CPIO_GZIP_LEVEL)?;
 
     // Verify the temporary artifact is valid
     if !temp_cpio.exists() || fs::metadata(&temp_cpio)?.len() < 1024 {
@@ -318,22 +319,6 @@ fn create_init_script(base_dir: &Path, initramfs_root: &Path) -> Result<()> {
     let mut perms = fs::metadata(&init_dst)?.permissions();
     perms.set_mode(0o755);
     fs::set_permissions(&init_dst, perms)?;
-
-    Ok(())
-}
-
-/// Build the cpio archive from initramfs root.
-fn build_cpio(root: &Path, output: &Path) -> Result<()> {
-    println!("Building cpio archive...");
-
-    let cpio_cmd = format!(
-        "cd {} && find . -print0 | cpio --null -o -H newc 2>/dev/null | gzip -{} > {}",
-        root.display(),
-        CPIO_GZIP_LEVEL,
-        output.display()
-    );
-
-    shell(&cpio_cmd)?;
 
     Ok(())
 }
