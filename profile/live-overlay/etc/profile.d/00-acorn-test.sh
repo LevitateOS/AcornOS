@@ -21,6 +21,11 @@ fi
 # TEST MODE ACTIVE - Emit structured markers for install-tests harness
 # ═══════════════════════════════════════════════════════════════════
 
+# Disable command echo on serial console
+# This prevents typed commands from being echoed back, which would
+# contaminate command output capture in the test harness
+stty -echo
+
 # Signal shell is ready - test harness waits for this
 echo "___SHELL_READY___"
 
