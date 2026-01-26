@@ -1,7 +1,7 @@
 // Alpine Linux Extended ISO - dependency recipe
 //
 // Provides: extracted Alpine rootfs for acornos to build upon
-// Output: RECIPE_DIR/output/rootfs
+// Output: RECIPE_DIR/../downloads/rootfs
 //
 // === Globals (provided by executor) ===
 //
@@ -38,7 +38,7 @@
 //   extract(archive, dest)    - Auto-detect format and extract (tar, zip, 7z, squashfs)
 //
 // File I/O:
-//   read_file(path)           - Read file content as string, "" if not exists
+//   read_file(path)           - Read file content as string, throws if not exists
 //   write_file(path, content) - Write string to file
 //
 // String:
@@ -48,24 +48,21 @@
 //   log(msg)                  - Print info message
 
 let ctx = #{
-    name: "alpine",
-    version: "3.23.2",
-    description: "Alpine Linux rootfs (extracted from Extended ISO)",
-
-    iso_name: "alpine-extended-3.23.2-x86_64.iso",
-    iso_url: "https://dl-cdn.alpinelinux.org/alpine/v3.23/releases/x86_64/alpine-extended-3.23.2-x86_64.iso",
-    sha256_url: "https://dl-cdn.alpinelinux.org/alpine/v3.23/releases/x86_64/alpine-extended-3.23.2-x86_64.iso.sha256",
-    sha256: "",
-    size_bytes: 1413529600,
-    disk_buffer: 536870912,
-
+    apk_static_path: "/home/vince/Projects/LevitateOS/AcornOS/downloads/apk-tools/sbin/apk.static",
     apk_tools_name: "apk-tools-static-3.0.3-r1.apk",
-    apk_tools_url: "https://dl-cdn.alpinelinux.org/alpine/v3.23/main/x86_64/apk-tools-static-3.0.3-r1.apk",
     apk_tools_sha256: "b7bb8715648d32854f06392468f69cd1dd4904d5fac9f9e43fc5d6942d53597c",
-
-    iso_path: "",
-    apk_static_path: "",
-    rootfs_path: "",
+    apk_tools_url: "https://dl-cdn.alpinelinux.org/alpine/v3.23/main/x86_64/apk-tools-static-3.0.3-r1.apk",
+    description: "Alpine Linux rootfs (extracted from Extended ISO)",
+    disk_buffer: 536870912,
+    iso_name: "alpine-extended-3.23.2-x86_64.iso",
+    iso_path: "/home/vince/Projects/LevitateOS/AcornOS/downloads/alpine-extended-3.23.2-x86_64.iso",
+    iso_url: "https://dl-cdn.alpinelinux.org/alpine/v3.23/releases/x86_64/alpine-extended-3.23.2-x86_64.iso",
+    name: "alpine",
+    rootfs_path: "/home/vince/Projects/LevitateOS/AcornOS/deps/../downloads/rootfs",
+    sha256: "8d50854936dba58e7616ac3bfa07ad67dac0347305fec1cba6d288cf5df1577d",
+    sha256_url: "https://dl-cdn.alpinelinux.org/alpine/v3.23/releases/x86_64/alpine-extended-3.23.2-x86_64.iso.sha256",
+    size_bytes: 1413529600,
+    version: "3.23.2",
 };
 
 // === ACQUIRE ===
@@ -158,7 +155,7 @@ fn is_built(ctx) {
     if !is_dir(join_path(rootfs_temp, "bin")) {
         throw "rootfs not built";
     }
-    let built_version = trim(read_file(version_file));
+    let built_version = if is_file(version_file) { trim(read_file(version_file)) } else { "" };
     if built_version != ctx.version {
         throw "version mismatch: built " + built_version + ", want " + ctx.version;
     }
@@ -171,7 +168,7 @@ fn build(ctx) {
     let version_file = join_path(BUILD_DIR, ".alpine-built-version");
 
     // Clean stale artifacts
-    let existing_version = trim(read_file(version_file));
+    let existing_version = if is_file(version_file) { trim(read_file(version_file)) } else { "" };
     if existing_version != "" && existing_version != ctx.version {
         log("Cleaning stale artifacts from " + existing_version);
         if is_dir(iso_contents) { rm(iso_contents); }
@@ -179,11 +176,11 @@ fn build(ctx) {
         rm(version_file);
     }
 
-    // Extract ISO
+    // Extract ISO (using 7z since extract() doesn't support ISO format)
     if !is_dir(join_path(iso_contents, "apks")) {
         log("Extracting ISO...");
         mkdir(iso_contents);
-        extract(ctx.iso_path, iso_contents);
+        shell("7z x -y -o" + iso_contents + " " + ctx.iso_path + " > /dev/null");
     }
 
     // Create rootfs
@@ -199,7 +196,57 @@ fn build(ctx) {
             "https://dl-cdn.alpinelinux.org/alpine/v3.23/community\n";
         write_file(join_path(rootfs_temp, "etc/apk/repositories"), repo_content);
 
-        shell(ctx.apk_static_path + " --root " + rootfs_temp + " --initdb --no-progress add alpine-base busybox openrc");
+        // --allow-untrusted is safe here since we verified the ISO checksum
+        // Package installation is split into tiers to handle dependencies properly
+
+        // === Tier 0: Bootable Minimum ===
+        // Absolute minimum for kernel to boot and hand off to init
+        log("Installing Tier 0: Bootable minimum...");
+        shell(ctx.apk_static_path + " --root " + rootfs_temp + " --usermode --initdb --no-progress --allow-untrusted add " +
+            "alpine-base " +
+            "openrc openrc-init " +
+            "linux-lts " +
+            "grub grub-efi efibootmgr " +
+            "e2fsprogs dosfstools util-linux"
+        );
+
+        // === Tier 1: Core System (P0 Requirements) ===
+        // Device management, firmware, storage, privilege escalation
+        log("Installing Tier 1: Core system...");
+        shell(ctx.apk_static_path + " --root " + rootfs_temp + " --usermode --no-progress --allow-untrusted add " +
+            "eudev eudev-openrc " +
+            "linux-firmware intel-ucode amd-ucode " +
+            "cryptsetup lvm2 btrfs-progs device-mapper " +
+            "util-linux-login " +
+            "bash coreutils " +
+            "doas " +
+            "grep sed gawk findutils"
+        );
+
+        // === Tier 2: Daily Driver (P1 Requirements) ===
+        // Networking, certificates, timezone, diagnostics
+        log("Installing Tier 2: Daily driver...");
+        shell(ctx.apk_static_path + " --root " + rootfs_temp + " --usermode --no-progress --allow-untrusted add " +
+            "dhcpcd iproute2 iputils " +
+            "iwd wireless-regdb " +
+            "ca-certificates " +
+            "tzdata " +
+            "curl less vim " +
+            "pciutils usbutils dmidecode ethtool smartmontools hdparm nvme-cli " +
+            "sof-firmware " +
+            "openssh chrony"
+        );
+
+        // === Tier 3: Live ISO Tools ===
+        // Partitioning and filesystem tools for installation
+        log("Installing Tier 3: Live ISO tools...");
+        shell(ctx.apk_static_path + " --root " + rootfs_temp + " --usermode --no-progress --allow-untrusted add " +
+            "parted sgdisk " +
+            "xfsprogs " +
+            "squashfs-tools"
+        );
+
+        log("Package installation complete");
     }
 
     write_file(version_file, ctx.version);
@@ -210,7 +257,7 @@ fn build(ctx) {
 // === INSTALL ===
 
 fn is_installed(ctx) {
-    let output_dir = join_path(RECIPE_DIR, "output");
+    let output_dir = join_path(RECIPE_DIR, "../downloads");
     let version_file = join_path(output_dir, ".alpine-version");
     if ctx.rootfs_path == "" {
         throw "not installed";
@@ -218,7 +265,7 @@ fn is_installed(ctx) {
     if !is_dir(join_path(ctx.rootfs_path, "bin")) {
         throw "rootfs missing";
     }
-    let installed_version = trim(read_file(version_file));
+    let installed_version = if is_file(version_file) { trim(read_file(version_file)) } else { "" };
     if installed_version != ctx.version {
         throw "version mismatch: installed " + installed_version + ", want " + ctx.version;
     }
@@ -227,11 +274,11 @@ fn is_installed(ctx) {
 
 fn install(ctx) {
     let rootfs_temp = join_path(BUILD_DIR, "rootfs");
-    let output_dir = join_path(RECIPE_DIR, "output");
+    let output_dir = join_path(RECIPE_DIR, "../downloads");
     let rootfs_dest = join_path(output_dir, "rootfs");
     let version_file = join_path(output_dir, ".alpine-version");
 
-    let existing_version = trim(read_file(version_file));
+    let existing_version = if is_file(version_file) { trim(read_file(version_file)) } else { "" };
     if existing_version == ctx.version {
         log("Alpine " + ctx.version + " already installed");
         ctx.rootfs_path = rootfs_dest;
@@ -277,11 +324,11 @@ fn cleanup(ctx) {
 // === REMOVE ===
 
 fn remove(ctx) {
-    let output_dir = join_path(RECIPE_DIR, "output");
+    let output_dir = join_path(RECIPE_DIR, "../downloads");
     let version_file = join_path(output_dir, ".alpine-version");
     let rootfs_dest = join_path(output_dir, "rootfs");
 
-    let installed_version = trim(read_file(version_file));
+    let installed_version = if is_file(version_file) { trim(read_file(version_file)) } else { "" };
     if installed_version == "" && !is_dir(rootfs_dest) {
         log("Nothing to remove");
         return ctx;

@@ -1,0 +1,247 @@
+//! Branding custom operations.
+//!
+//! Creates AcornOS identity files: os-release, MOTD, hostname, etc.
+
+use anyhow::Result;
+use std::fs;
+
+use super::super::context::BuildContext;
+use distro_spec::acorn::{OS_ID, OS_NAME, OS_VERSION};
+
+/// Create /etc/os-release for AcornOS.
+pub fn create_os_release(ctx: &BuildContext) -> Result<()> {
+    let content = format!(
+        r#"NAME="{}"
+ID={}
+ID_LIKE=alpine
+VERSION_ID={}
+PRETTY_NAME="{}"
+HOME_URL="https://levitateos.org/acorn"
+BUG_REPORT_URL="https://github.com/levitateos/levitateos/issues"
+"#,
+        OS_NAME, OS_ID, OS_VERSION, OS_NAME
+    );
+
+    let path = ctx.staging.join("etc/os-release");
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(&path, &content)?;
+
+    // Also create /usr/lib/os-release (canonical location)
+    let lib_path = ctx.staging.join("usr/lib/os-release");
+    if let Some(parent) = lib_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(&lib_path, &content)?;
+
+    Ok(())
+}
+
+/// Create branding files (MOTD, issue, hostname).
+pub fn create_branding(ctx: &BuildContext) -> Result<()> {
+    let staging = &ctx.staging;
+
+    // Hostname
+    fs::write(staging.join("etc/hostname"), "acornos\n")?;
+
+    // MOTD
+    let motd = format!(
+        r#"
+    _                          ___  ____
+   / \   ___ ___  _ __ _ __   / _ \/ ___|
+  / _ \ / __/ _ \| '__| '_ \ | | | \___ \
+ / ___ \ (_| (_) | |  | | | || |_| |___) |
+/_/   \_\___\___/|_|  |_| |_| \___/|____/
+
+Welcome to {}!
+
+Documentation: https://levitateos.org/acorn/docs
+Source code:   https://github.com/levitateos/levitateos
+
+"#,
+        OS_NAME
+    );
+    fs::write(staging.join("etc/motd"), motd)?;
+
+    // Issue (login prompt)
+    let issue = format!("{} \\n \\l\n\n", OS_NAME);
+    fs::write(staging.join("etc/issue"), issue)?;
+
+    // Hosts file
+    fs::write(
+        staging.join("etc/hosts"),
+        "127.0.0.1\tlocalhost\n::1\t\tlocalhost\n127.0.1.1\tacornos\n",
+    )?;
+
+    Ok(())
+}
+
+/// Create essential /etc configuration files.
+pub fn create_etc_files(ctx: &BuildContext) -> Result<()> {
+    let staging = &ctx.staging;
+
+    // /etc/passwd - base system users
+    // Copy from source if exists, otherwise create minimal
+    let passwd_src = ctx.source.join("etc/passwd");
+    let passwd_dst = staging.join("etc/passwd");
+    if passwd_src.exists() {
+        fs::copy(&passwd_src, &passwd_dst)?;
+    } else {
+        fs::write(
+            &passwd_dst,
+            "root:x:0:0:root:/root:/bin/ash\n\
+             nobody:x:65534:65534:nobody:/:/sbin/nologin\n",
+        )?;
+    }
+
+    // /etc/group - base system groups
+    let group_src = ctx.source.join("etc/group");
+    let group_dst = staging.join("etc/group");
+    if group_src.exists() {
+        fs::copy(&group_src, &group_dst)?;
+    } else {
+        fs::write(
+            &group_dst,
+            "root:x:0:\n\
+             wheel:x:10:\n\
+             nobody:x:65534:\n",
+        )?;
+    }
+
+    // /etc/shadow - password hashes (root with no password for live)
+    let shadow_dst = staging.join("etc/shadow");
+    fs::write(
+        &shadow_dst,
+        "root::19000:0:99999:7:::\n\
+         nobody:!:19000:0:99999:7:::\n",
+    )?;
+    // Make shadow readable only by root
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(&shadow_dst, fs::Permissions::from_mode(0o600))?;
+
+    // /etc/gshadow
+    let gshadow_dst = staging.join("etc/gshadow");
+    fs::write(
+        &gshadow_dst,
+        "root:::\n\
+         wheel:::\n\
+         nobody:::\n",
+    )?;
+    fs::set_permissions(&gshadow_dst, fs::Permissions::from_mode(0o600))?;
+
+    // /etc/securetty - allow root login on various terminals
+    fs::write(
+        staging.join("etc/securetty"),
+        "console\ntty1\ntty2\ntty3\ntty4\ntty5\ntty6\nttyS0\nttyS1\n",
+    )?;
+
+    // /etc/profile
+    let profile_src = ctx.source.join("etc/profile");
+    let profile_dst = staging.join("etc/profile");
+    if profile_src.exists() {
+        fs::copy(&profile_src, &profile_dst)?;
+    } else {
+        fs::write(
+            &profile_dst,
+            r#"# /etc/profile - AcornOS
+
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+export TERM="${TERM:-linux}"
+export PAGER="less"
+export EDITOR="vim"
+
+# Source profile.d scripts
+if [ -d /etc/profile.d ]; then
+    for i in /etc/profile.d/*.sh; do
+        [ -r "$i" ] && . "$i"
+    done
+fi
+"#,
+        )?;
+    }
+
+    // /etc/profile.d directory
+    fs::create_dir_all(staging.join("etc/profile.d"))?;
+
+    // /etc/inputrc
+    let inputrc_src = ctx.source.join("etc/inputrc");
+    if inputrc_src.exists() {
+        fs::copy(&inputrc_src, staging.join("etc/inputrc"))?;
+    }
+
+    // /etc/nsswitch.conf
+    fs::write(
+        staging.join("etc/nsswitch.conf"),
+        "passwd: files\n\
+         group:  files\n\
+         shadow: files\n\
+         hosts:  files dns\n",
+    )?;
+
+    // /etc/resolv.conf (empty, DHCP will populate)
+    fs::write(staging.join("etc/resolv.conf"), "# Generated by dhcpcd\n")?;
+
+    Ok(())
+}
+
+/// Copy timezone data.
+pub fn copy_timezone_data(ctx: &BuildContext) -> Result<()> {
+    let staging = &ctx.staging;
+
+    // Copy zoneinfo
+    let zoneinfo_src = ctx.source.join("usr/share/zoneinfo");
+    let zoneinfo_dst = staging.join("usr/share/zoneinfo");
+    if zoneinfo_src.exists() {
+        copy_tree(&zoneinfo_src, &zoneinfo_dst)?;
+    }
+
+    // Set default timezone to UTC
+    let localtime_dst = staging.join("etc/localtime");
+    let utc_src = staging.join("usr/share/zoneinfo/UTC");
+    if utc_src.exists() && !localtime_dst.exists() {
+        fs::copy(&utc_src, &localtime_dst)?;
+    }
+
+    // Create timezone file
+    fs::write(staging.join("etc/timezone"), "UTC\n")?;
+
+    Ok(())
+}
+
+/// Copy a directory tree recursively.
+fn copy_tree(src: &std::path::Path, dst: &std::path::Path) -> Result<()> {
+    if !src.exists() {
+        return Ok(());
+    }
+
+    if src.is_file() {
+        if let Some(parent) = dst.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::copy(src, dst)?;
+        return Ok(());
+    }
+
+    fs::create_dir_all(dst)?;
+
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+
+        if src_path.is_symlink() {
+            let target = fs::read_link(&src_path)?;
+            if dst_path.exists() || dst_path.is_symlink() {
+                fs::remove_file(&dst_path)?;
+            }
+            std::os::unix::fs::symlink(&target, &dst_path)?;
+        } else if src_path.is_dir() {
+            copy_tree(&src_path, &dst_path)?;
+        } else {
+            fs::copy(&src_path, &dst_path)?;
+        }
+    }
+
+    Ok(())
+}

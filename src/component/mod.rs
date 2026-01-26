@@ -1,7 +1,22 @@
-//! AcornOS component definitions.
+//! AcornOS component system.
 //!
-//! This module contains AcornOS-specific component definitions,
-//! similar to leviso's `component/definitions.rs`.
+//! This module provides a declarative component system for building AcornOS
+//! system images. Components are defined as data structures that describe
+//! WHAT needs to happen, not HOW. The executor interprets these definitions.
+//!
+//! # Architecture
+//!
+//! ```text
+//! Component Definition (DATA)     →     Executor (LOGIC)
+//! ─────────────────────────────        ─────────────────
+//! OPENRC = Component {                 for op in component.ops {
+//!   ops: [                               execute_op(ctx, op)?;
+//!     dir("etc/init.d"),               }
+//!     openrc_enable("networking", "boot"),
+//!     custom(CreateOsRelease),
+//!   ]
+//! }
+//! ```
 //!
 //! # Key Differences from LevitateOS
 //!
@@ -9,144 +24,294 @@
 //! |--------|-----------|---------|
 //! | Init | systemd units | OpenRC services |
 //! | Coreutils | GNU binaries | busybox applets |
-//! | Device manager | udev | mdev (busybox) |
+//! | Device manager | udev | mdev (busybox) or eudev |
 //! | Shell | bash | ash (busybox) |
 //! | Library paths | /usr/lib64 (glibc) | /usr/lib (musl) |
-//!
-//! # Status
-//!
-//! **PLACEHOLDER** - Component definitions not yet implemented.
-//!
-//! # Example (future)
-//!
-//! ```rust,ignore
-//! use acornos::component::{OpenRCComponent, BusyboxComponent};
-//! use distro_builder::component::Installable;
-//!
-//! let openrc = OpenRCComponent;
-//! let busybox = BusyboxComponent;
-//!
-//! for op in openrc.ops() {
-//!     executor.execute(op)?;
-//! }
-//! ```
 
-use distro_builder::component::{Installable, Op, Phase};
+pub mod builder;
+pub mod context;
+pub mod custom;
+pub mod definitions;
+pub mod executor;
 
-/// OpenRC service operation.
+pub use builder::build_system;
+pub use context::BuildContext;
+pub use definitions::*;
+
+// Re-export from distro-builder for convenience
+pub use distro_builder::component::{Installable, Phase};
+
+/// A system component that can be installed.
 ///
-/// AcornOS uses OpenRC instead of systemd.
+/// Components are immutable data describing what operations need to be
+/// performed to set up a particular system service.
 #[derive(Debug, Clone)]
-pub enum OpenRCOp {
-    /// Add service to runlevel.
+pub struct Component {
+    /// Human-readable name for logging.
+    pub name: &'static str,
+    /// Build phase (determines ordering).
+    pub phase: Phase,
+    /// Operations to perform.
+    pub ops: &'static [Op],
+}
+
+impl Installable for Component {
+    fn name(&self) -> &str {
+        self.name
+    }
+
+    fn phase(&self) -> Phase {
+        self.phase
+    }
+
+    fn ops(&self) -> Vec<distro_builder::component::Op> {
+        // Convert our static ops to distro_builder ops for the trait
+        // Note: We handle our own ops in our executor
+        vec![]
+    }
+}
+
+impl Installable for &Component {
+    fn name(&self) -> &str {
+        self.name
+    }
+
+    fn phase(&self) -> Phase {
+        self.phase
+    }
+
+    fn ops(&self) -> Vec<distro_builder::component::Op> {
+        vec![]
+    }
+}
+
+/// Operations that can be performed during component installation.
+///
+/// Each variant represents a single atomic operation. The executor
+/// handles the actual implementation, ensuring consistent behavior.
+///
+/// ALL operations are required. If something is listed, it must exist.
+/// There is no "optional" - this is a daily driver OS, not a toy.
+#[derive(Debug, Clone)]
+pub enum Op {
+    // ─────────────────────────────────────────────────────────────────────
+    // Directory operations
+    // ─────────────────────────────────────────────────────────────────────
+    /// Create a directory (uses create_dir_all).
+    Dir(&'static str),
+
+    /// Create a directory with specific permissions.
+    DirMode(&'static str, u32),
+
+    /// Create multiple directories at once.
+    Dirs(&'static [&'static str]),
+
+    // ─────────────────────────────────────────────────────────────────────
+    // File operations
+    // ─────────────────────────────────────────────────────────────────────
+    /// Write a file with given content.
+    WriteFile(&'static str, &'static str),
+
+    /// Write a file with specific permissions.
+    WriteFileMode(&'static str, &'static str, u32),
+
+    /// Create a symlink (link_path, target).
+    Symlink(&'static str, &'static str),
+
+    /// Copy a single file from source to staging. Fails if not found.
+    CopyFile(&'static str),
+
+    /// Copy a directory tree from source to staging.
+    CopyTree(&'static str),
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Binary operations (simplified for busybox-based system)
+    // ─────────────────────────────────────────────────────────────────────
+    /// Copy a binary with library dependencies to /usr/bin.
+    /// For busybox applets, this creates a symlink instead.
+    Bin(&'static str),
+
+    /// Copy a binary to /usr/sbin.
+    Sbin(&'static str),
+
+    /// Copy multiple binaries to /usr/bin.
+    Bins(&'static [&'static str]),
+
+    /// Copy multiple binaries to /usr/sbin.
+    Sbins(&'static [&'static str]),
+
+    // ─────────────────────────────────────────────────────────────────────
+    // OpenRC operations (AcornOS-specific)
+    // ─────────────────────────────────────────────────────────────────────
+    /// Enable an OpenRC service in a runlevel.
     ///
-    /// Equivalent to: `rc-update add <service> <runlevel>`
-    AddService {
-        /// Service name (e.g., "sshd", "networking")
-        service: String,
-        /// Runlevel (e.g., "boot", "default", "sysinit")
-        runlevel: String,
+    /// Creates symlink: /etc/runlevels/<runlevel>/<service> -> /etc/init.d/<service>
+    OpenrcEnable(&'static str, &'static str),
+
+    /// Copy OpenRC init scripts from source.
+    OpenrcScripts(&'static [&'static str]),
+
+    /// Write an OpenRC conf.d configuration file.
+    OpenrcConf(&'static str, &'static str),
+
+    // ─────────────────────────────────────────────────────────────────────
+    // User/group operations
+    // ─────────────────────────────────────────────────────────────────────
+    /// Ensure a user exists in passwd file.
+    User {
+        name: &'static str,
+        uid: u32,
+        gid: u32,
+        home: &'static str,
+        shell: &'static str,
     },
 
-    /// Copy an OpenRC service script to /etc/init.d/
-    CopyService(String),
+    /// Ensure a group exists in group file.
+    Group { name: &'static str, gid: u32 },
 
-    /// Create an OpenRC conf.d configuration file.
-    ///
-    /// Creates /etc/conf.d/<service> with the given content.
-    CreateConf {
-        /// Service name
-        service: String,
-        /// Configuration content
-        content: String,
-    },
+    // ─────────────────────────────────────────────────────────────────────
+    // Custom operations (dispatch to custom modules)
+    // ─────────────────────────────────────────────────────────────────────
+    /// Run a custom operation.
+    Custom(CustomOp),
 }
 
-/// Busybox applet setup operation.
-#[derive(Debug, Clone)]
-pub enum BusyboxOp {
-    /// Create symlinks for busybox applets in /bin and /sbin.
-    CreateAppletSymlinks(Vec<String>),
-
-    /// Install the busybox binary to /bin/busybox.
-    InstallBusybox,
+/// Custom operations that require imperative code.
+///
+/// These operations have complex logic that doesn't fit the declarative
+/// pattern. Each variant maps to a function in the custom module.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CustomOp {
+    /// Create FHS symlinks (merged /usr).
+    CreateFhsSymlinks,
+    /// Create AcornOS /etc/os-release.
+    CreateOsRelease,
+    /// Create AcornOS MOTD and issue files.
+    CreateBranding,
+    /// Create busybox applet symlinks.
+    CreateBusyboxApplets,
+    /// Setup mdev or eudev device manager.
+    SetupDeviceManager,
+    /// Copy WiFi firmware.
+    CopyWifiFirmware,
+    /// Copy all firmware.
+    CopyAllFirmware,
+    /// Create /etc configuration files.
+    CreateEtcFiles,
+    /// Copy timezone data.
+    CopyTimezoneData,
+    /// Create welcome message for live ISO.
+    CreateWelcomeMessage,
+    /// Setup live overlay directory.
+    CreateLiveOverlay,
+    /// Copy recstrap installer tools.
+    CopyRecstrap,
 }
 
-/// Placeholder component for AcornOS filesystem setup.
-///
-/// # Status
-///
-/// **PLACEHOLDER** - Returns empty ops.
-pub struct FilesystemComponent;
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper functions for readable component definitions
+// ─────────────────────────────────────────────────────────────────────────────
 
-impl Installable for FilesystemComponent {
-    fn name(&self) -> &str {
-        "Filesystem"
-    }
+/// Create a directory.
+pub const fn dir(path: &'static str) -> Op {
+    Op::Dir(path)
+}
 
-    fn phase(&self) -> Phase {
-        Phase::Filesystem
-    }
+/// Create a directory with specific mode.
+pub const fn dir_mode(path: &'static str, mode: u32) -> Op {
+    Op::DirMode(path, mode)
+}
 
-    fn ops(&self) -> Vec<Op> {
-        // TODO: Implement AcornOS filesystem operations
-        // Differences from LevitateOS:
-        // - /bin/sh -> busybox (not bash)
-        // - /usr/lib only (no /usr/lib64 with musl)
-        // - Different FHS layout for Alpine
-        vec![]
+/// Create multiple directories.
+pub const fn dirs(paths: &'static [&'static str]) -> Op {
+    Op::Dirs(paths)
+}
+
+/// Write a file.
+pub const fn write_file(path: &'static str, content: &'static str) -> Op {
+    Op::WriteFile(path, content)
+}
+
+/// Write a file with permissions.
+pub const fn write_file_mode(path: &'static str, content: &'static str, mode: u32) -> Op {
+    Op::WriteFileMode(path, content, mode)
+}
+
+/// Create a symlink.
+pub const fn symlink(link: &'static str, target: &'static str) -> Op {
+    Op::Symlink(link, target)
+}
+
+/// Copy a file from source. Fails if not found.
+pub const fn copy_file(path: &'static str) -> Op {
+    Op::CopyFile(path)
+}
+
+/// Copy a directory tree from source.
+pub const fn copy_tree(path: &'static str) -> Op {
+    Op::CopyTree(path)
+}
+
+/// Copy a binary to /usr/bin.
+pub const fn bin(name: &'static str) -> Op {
+    Op::Bin(name)
+}
+
+/// Copy a binary to /usr/sbin.
+pub const fn sbin(name: &'static str) -> Op {
+    Op::Sbin(name)
+}
+
+/// Copy multiple binaries to /usr/bin.
+pub const fn bins(names: &'static [&'static str]) -> Op {
+    Op::Bins(names)
+}
+
+/// Copy multiple binaries to /usr/sbin.
+pub const fn sbins(names: &'static [&'static str]) -> Op {
+    Op::Sbins(names)
+}
+
+/// Enable an OpenRC service in a runlevel.
+pub const fn openrc_enable(service: &'static str, runlevel: &'static str) -> Op {
+    Op::OpenrcEnable(service, runlevel)
+}
+
+/// Copy OpenRC init scripts.
+pub const fn openrc_scripts(scripts: &'static [&'static str]) -> Op {
+    Op::OpenrcScripts(scripts)
+}
+
+/// Write an OpenRC conf.d file.
+pub const fn openrc_conf(service: &'static str, content: &'static str) -> Op {
+    Op::OpenrcConf(service, content)
+}
+
+/// Ensure a user exists.
+pub const fn user(
+    name: &'static str,
+    uid: u32,
+    gid: u32,
+    home: &'static str,
+    shell: &'static str,
+) -> Op {
+    Op::User {
+        name,
+        uid,
+        gid,
+        home,
+        shell,
     }
 }
 
-/// Placeholder component for OpenRC setup.
-///
-/// # Status
-///
-/// **PLACEHOLDER** - Returns empty ops.
-pub struct OpenRCComponent;
-
-impl Installable for OpenRCComponent {
-    fn name(&self) -> &str {
-        "OpenRC"
-    }
-
-    fn phase(&self) -> Phase {
-        Phase::Init
-    }
-
-    fn ops(&self) -> Vec<Op> {
-        // TODO: Implement OpenRC setup
-        // - Copy openrc binary and libraries
-        // - Set up /etc/rc.conf
-        // - Create runlevel directories (/etc/runlevels/*)
-        // - Copy init scripts to /etc/init.d/
-        vec![]
-    }
+/// Ensure a group exists.
+pub const fn group(name: &'static str, gid: u32) -> Op {
+    Op::Group { name, gid }
 }
 
-/// Placeholder component for busybox setup.
-///
-/// # Status
-///
-/// **PLACEHOLDER** - Returns empty ops.
-pub struct BusyboxComponent;
-
-impl Installable for BusyboxComponent {
-    fn name(&self) -> &str {
-        "Busybox"
-    }
-
-    fn phase(&self) -> Phase {
-        Phase::Binaries
-    }
-
-    fn ops(&self) -> Vec<Op> {
-        // TODO: Implement busybox setup
-        // - Copy busybox binary
-        // - Create applet symlinks (ls, cat, grep, etc.)
-        // - Set up /bin/sh -> busybox
-        vec![]
-    }
+/// Run a custom operation.
+pub const fn custom(op: CustomOp) -> Op {
+    Op::Custom(op)
 }
 
 #[cfg(test)]
@@ -154,16 +319,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_component_phases() {
-        assert_eq!(FilesystemComponent.phase(), Phase::Filesystem);
-        assert_eq!(OpenRCComponent.phase(), Phase::Init);
-        assert_eq!(BusyboxComponent.phase(), Phase::Binaries);
+    fn test_op_helpers() {
+        // Test that helper functions create expected Op variants
+        assert!(matches!(dir("etc"), Op::Dir("etc")));
+        assert!(matches!(
+            write_file("etc/hostname", "acornos"),
+            Op::WriteFile("etc/hostname", "acornos")
+        ));
+        assert!(matches!(
+            openrc_enable("networking", "boot"),
+            Op::OpenrcEnable("networking", "boot")
+        ));
     }
 
     #[test]
-    fn test_component_names() {
-        assert_eq!(FilesystemComponent.name(), "Filesystem");
-        assert_eq!(OpenRCComponent.name(), "OpenRC");
-        assert_eq!(BusyboxComponent.name(), "Busybox");
+    fn test_custom_ops() {
+        assert!(matches!(
+            custom(CustomOp::CreateOsRelease),
+            Op::Custom(CustomOp::CreateOsRelease)
+        ));
     }
 }
