@@ -4,7 +4,7 @@
 > and user documentation. Keep descriptions clear, complete, and user-facing.
 
 **Version:** 1.0
-**Last Updated:** 2026-01-25
+**Last Updated:** 2026-01-26
 **Goal:** Everything a user needs to use AcornOS as their primary operating system, competing directly with Arch Linux (Alpine-based alternative to LevitateOS).
 
 ---
@@ -462,7 +462,7 @@ These are known gaps in the live environment (squashfs):
 - [ ] Document verification process on website
 
 ### 1.1 Boot Modes
-- [ ] UEFI boot (GPT, ESP partition)
+- [x] UEFI boot (GPT, ESP partition) - verified by install-tests phase 1
 - [ ] BIOS/Legacy boot (MBR) - P2 (optional but nice)
 - [ ] Secure Boot signed - P3 (future)
 
@@ -470,7 +470,7 @@ These are known gaps in the live environment (squashfs):
 - [ ] ISO boots on real hardware (needs testing)
 - [ ] ISO boots in VirtualBox (needs testing)
 - [ ] ISO boots in VMware (needs testing)
-- [ ] ISO boots in QEMU/KVM
+- [x] ISO boots in QEMU/KVM (verified by install-tests phase 1)
 - [ ] ISO boots in Hyper-V (needs testing)
 - [ ] USB bootable (dd or Ventoy compatible)
 
@@ -1008,12 +1008,12 @@ Some software has glibc-specific assumptions:
 
 | Category | Items | Tested | Notes |
 |----------|-------|--------|-------|
-| Boot | 10 | No | |
+| Boot | 10 | Partial | UEFI+QEMU verified via install-tests phase 1 |
 | Network | 25+ | No | |
 | Storage | 20+ | No | |
 | Users | 15+ | No | |
 | Utilities | 40+ | No | busybox applets |
-| OpenRC | 15+ | No | |
+| OpenRC | 15+ | Partial | Boots to default runlevel (install-tests) |
 | Hardware | 25+ | No | |
 | Packages | 5 | No | |
 | Security | 10+ | No | |
