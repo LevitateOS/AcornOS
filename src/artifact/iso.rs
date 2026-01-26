@@ -455,11 +455,7 @@ fn setup_uefi_boot(paths: &IsoPaths) -> Result<()> {
         fs::write(&embedded_cfg_path, embedded_cfg)?;
 
         // Try grub2-mkstandalone (Fedora) first, then grub-mkstandalone (Debian/Ubuntu)
-        let grub_cmd = if std::process::Command::new("grub2-mkstandalone")
-            .arg("--version")
-            .output()
-            .is_ok()
-        {
+        let grub_cmd = if distro_builder::process::exists("grub2-mkstandalone") {
             "grub2-mkstandalone"
         } else {
             "grub-mkstandalone"

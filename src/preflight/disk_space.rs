@@ -3,8 +3,8 @@
 //! Verifies sufficient disk space is available for downloads and build artifacts.
 
 use super::CheckResult;
+use distro_builder::process::Cmd;
 use std::path::Path;
-use std::process::Command;
 
 /// Minimum required disk space in bytes (5 GB).
 ///
@@ -15,19 +15,20 @@ use std::process::Command;
 /// - Build artifacts (squashfs, initramfs, ISO): ~1 GB
 const MIN_DISK_SPACE_BYTES: u64 = 5 * 1024 * 1024 * 1024;
 
-/// Check that sufficient disk space is available.
+/// Check that sufficient disk space is available (using shared infrastructure).
 pub fn check_disk_space(base_dir: &Path) -> CheckResult {
     // Use df to get available space
-    let output = Command::new("df")
+    let result = Cmd::new("df")
         .args(["--output=avail", "-B1"]) // Output available bytes
-        .arg(base_dir)
-        .output();
+        .arg_path(base_dir)
+        .allow_fail()
+        .run();
 
-    match output {
-        Ok(output) if output.status.success() => {
-            let stdout = String::from_utf8_lossy(&output.stdout);
+    match result {
+        Ok(result) if result.success() => {
             // Skip header line, get first number
-            let available = stdout
+            let available = result
+                .stdout
                 .lines()
                 .nth(1)
                 .and_then(|line| line.trim().parse::<u64>().ok())
@@ -61,15 +62,17 @@ pub fn check_disk_space(base_dir: &Path) -> CheckResult {
 }
 
 /// Get available disk space in bytes (for programmatic use).
+#[allow(dead_code)]
 pub fn available_space(path: &Path) -> Option<u64> {
-    Command::new("df")
+    Cmd::new("df")
         .args(["--output=avail", "-B1"])
-        .arg(path)
-        .output()
+        .arg_path(path)
+        .allow_fail()
+        .run()
         .ok()
-        .filter(|o| o.status.success())
-        .and_then(|o| {
-            String::from_utf8_lossy(&o.stdout)
+        .filter(|r| r.success())
+        .and_then(|r| {
+            r.stdout
                 .lines()
                 .nth(1)
                 .and_then(|line| line.trim().parse::<u64>().ok())

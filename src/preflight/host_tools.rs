@@ -3,7 +3,7 @@
 //! Checks that required external tools are installed and executable.
 
 use super::CheckResult;
-use std::process::Command;
+use distro_builder::process::{exists, which};
 
 /// Required host tools with their install suggestions.
 const REQUIRED_TOOLS: &[(&str, &str, &str)] = &[
@@ -23,18 +23,14 @@ pub fn check_host_tools() -> Vec<CheckResult> {
         .collect()
 }
 
-/// Check a single tool.
+/// Check a single tool (using shared infrastructure from distro-builder).
 fn check_tool(tool: &str, purpose: &str, install_cmd: &str) -> CheckResult {
-    match Command::new("which").arg(tool).output() {
-        Ok(output) if output.status.success() => {
-            let path = String::from_utf8_lossy(&output.stdout);
-            let path = path.trim();
-            CheckResult::pass(
-                format!("{} tool", tool),
-                format!("Found at {} ({})", path, purpose),
-            )
-        }
-        _ => CheckResult::fail(
+    match which(tool) {
+        Some(path) => CheckResult::pass(
+            format!("{} tool", tool),
+            format!("Found at {} ({})", path, purpose),
+        ),
+        None => CheckResult::fail(
             format!("{} tool", tool),
             format!("Not found (needed for: {})", purpose),
             install_cmd,
@@ -43,12 +39,9 @@ fn check_tool(tool: &str, purpose: &str, install_cmd: &str) -> CheckResult {
 }
 
 /// Check if a specific tool is available (returns bool for quick checks).
+#[allow(dead_code)]
 pub fn has_tool(tool: &str) -> bool {
-    Command::new("which")
-        .arg(tool)
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+    exists(tool)
 }
 
 #[cfg(test)]

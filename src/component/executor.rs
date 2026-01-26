@@ -9,6 +9,8 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
+use distro_builder::process::Cmd;
+
 use super::context::BuildContext;
 use super::{Component, Op};
 
@@ -236,18 +238,19 @@ fn copy_binary(ctx: &BuildContext, name: &str, dest_dir: &str) -> Result<()> {
 ///
 /// Uses ldd to find dependencies and copies them to staging.
 fn copy_library_deps(ctx: &BuildContext, binary: &Path) -> Result<()> {
-    // Run ldd on the binary
-    let output = std::process::Command::new("ldd")
-        .arg(binary)
-        .output()
+    // Run ldd on the binary (using shared infrastructure)
+    let result = Cmd::new("ldd")
+        .arg_path(binary)
+        .allow_fail() // Some binaries (static) don't have deps - that's OK
+        .run()
         .context("failed to run ldd")?;
 
-    if !output.status.success() {
-        // Some binaries (static) don't have deps - that's OK
+    if !result.success() {
+        // Static binary or ldd failed - no deps to copy
         return Ok(());
     }
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stdout = &result.stdout;
 
     for line in stdout.lines() {
         // Parse ldd output: "libfoo.so.1 => /usr/lib/libfoo.so.1 (0x...)"
