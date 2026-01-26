@@ -43,7 +43,7 @@ AcornOS Builder Status
 Status: SKELETON - Not yet implemented
 
 AcornOS is a sibling distribution to LevitateOS:
-  - Alpine Linux base (musl, busybox)
+  - Packages sourced from Alpine repositories (musl, busybox)
   - OpenRC init system
   - Daily driver desktop (NOT minimal)
 

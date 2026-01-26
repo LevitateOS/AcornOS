@@ -1,0 +1,9 @@
+Welcome to AcornOS!
+
+AcornOS is a daily driver Linux distribution.
+  - Init: OpenRC
+  - Shell: ash (busybox)
+  - C library: musl
+
+Documentation: https://levitateos.org/acorn
+

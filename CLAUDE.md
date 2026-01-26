@@ -92,15 +92,29 @@ distro_spec::acorn::DEFAULT_SHELL     // "/bin/ash"
 
 ---
 
+## Critical: AcornOS is NOT Alpine
+
+**AcornOS is its own distribution.** It uses Alpine's APK repositories as a **package source**, just like LevitateOS uses Rocky Linux RPMs as a package source.
+
+| Distro | Package Source | Identity |
+|--------|----------------|----------|
+| LevitateOS | Rocky Linux RPMs | LevitateOS (NOT Rocky rebrand) |
+| AcornOS | Alpine APKs | AcornOS (NOT Alpine rebrand) |
+
+The rootfs should show "AcornOS", not "Alpine". The MOTD should say "Welcome to AcornOS", not "Welcome to Alpine".
+
+We use Alpine's packages because:
+1. musl + busybox = smaller attack surface
+2. APK format is simple and well-documented
+3. Large package repository
+4. Compatible with OpenRC
+
+---
+
 ## Anti-Patterns to Avoid
 
 ### "It's Alpine, so it should be minimal"
-**WRONG.** AcornOS is a **daily driver desktop**. Alpine is the BASE, not the GOAL.
-
-We use Alpine because:
-1. musl + busybox = smaller attack surface
-2. OpenRC = simpler init
-3. Different from LevitateOS (user choice)
+**WRONG.** AcornOS is a **daily driver desktop**. Alpine is a package SOURCE, not the GOAL.
 
 We do NOT use Alpine to be "minimal". A complete desktop needs:
 - Firmware support
@@ -110,6 +124,9 @@ We do NOT use Alpine to be "minimal". A complete desktop needs:
 
 ### "Skip X because Alpine doesn't need it"
 **WRONG.** If LevitateOS has it and users need it, AcornOS needs it too.
+
+### "Just extract Alpine rootfs and rebrand it"
+**WRONG.** AcornOS builds its own rootfs by installing packages from Alpine repos, with AcornOS-specific configuration, branding, and customization.
 
 ---
 

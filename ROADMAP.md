@@ -5,7 +5,7 @@
 
 **Version:** 1.0
 **Last Updated:** 2026-01-26
-**Goal:** Everything a user needs to use AcornOS as their primary operating system, competing directly with Arch Linux (Alpine-based alternative to LevitateOS).
+**Goal:** Everything a user needs to use AcornOS as their primary operating system, competing directly with Arch Linux (musl/OpenRC alternative to LevitateOS).
 
 ---
 
