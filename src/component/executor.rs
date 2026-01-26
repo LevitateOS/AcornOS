@@ -275,9 +275,14 @@ fn make_executable(path: &Path) -> Result<()> {
 }
 
 /// Copy a directory tree recursively.
+///
+/// NOTE: This function logs a warning but continues if the source doesn't exist.
+/// This is intentional for optional config directories (like etc/udev/rules.d).
+/// For required directories, use a separate validation step.
 fn copy_tree(src: &Path, dst: &Path) -> Result<()> {
     if !src.exists() {
-        // Source doesn't exist - that's OK, skip silently
+        // Log but don't fail - some config directories are optional
+        println!("  [WARN] copy_tree: source not found: {}", src.display());
         return Ok(());
     }
 
@@ -330,13 +335,18 @@ fn enable_openrc_service(ctx: &BuildContext, service: &str, runlevel: &str) -> R
 }
 
 /// Copy an OpenRC init script.
+///
+/// FAIL FAST: If a script is listed, it must exist. There is no "optional".
 fn copy_init_script(ctx: &BuildContext, script: &str) -> Result<()> {
     let src = ctx.source.join("etc/init.d").join(script);
     let dst = ctx.staging.join("etc/init.d").join(script);
 
     if !src.exists() {
-        // Script might not exist in source - that's OK for optional services
-        return Ok(());
+        bail!(
+            "OpenRC init script not found: {}\n\
+             This script is required. Check that the corresponding package is installed in alpine.rhai.",
+            src.display()
+        );
     }
 
     if let Some(parent) = dst.parent() {

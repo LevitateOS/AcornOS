@@ -55,12 +55,11 @@ pub fn create_applet_symlinks(ctx: &BuildContext) -> Result<()> {
         }
     }
 
-    // Create essential /bin symlinks for compatibility
-    // These are absolute symlinks to work from initramfs
-    let bin_compat = staging.join("bin");
-    fs::create_dir_all(&bin_compat)?;
-    for name in &["sh", "busybox"] {
-        let link = bin_compat.join(name);
+    // Create essential symlinks in /usr/bin that may be needed
+    // Note: /bin is a symlink to /usr/bin (merged-usr), so we put these in usr/bin directly
+    // The FHS symlinks are created by FILESYSTEM component before this runs
+    for name in &["sh"] {
+        let link = bin_dir.join(name);
         if !link.exists() && !link.is_symlink() {
             std::os::unix::fs::symlink("/usr/bin/busybox", &link)?;
         }

@@ -16,7 +16,7 @@ use distro_builder::component::Phase;
 
 use super::{
     bin, bins, copy_tree, custom, dir, dir_mode, dirs, group, openrc_conf, openrc_enable,
-    openrc_scripts, sbins, symlink, user, write_file, write_file_mode, Component, CustomOp,
+    openrc_scripts, sbins, user, write_file, write_file_mode, Component, CustomOp,
 };
 
 // =============================================================================
@@ -92,10 +92,8 @@ pub static BUSYBOX: Component = Component {
     ops: &[
         // Copy busybox binary
         bin("busybox"),
-        // Create all applet symlinks
+        // Create all applet symlinks (includes /usr/bin/sh -> busybox)
         custom(CustomOp::CreateBusyboxApplets),
-        // Ensure /bin/sh points to busybox
-        symlink("bin/sh", "/bin/busybox"),
     ],
 };
 
@@ -116,6 +114,8 @@ const ADDITIONAL_BINS: &[&str] = &[
 ];
 
 const ADDITIONAL_SBINS: &[&str] = &[
+    // Login (required for inittab)
+    "agetty",
     // Partitioning
     "fdisk",
     "parted",
@@ -176,6 +176,7 @@ const OPENRC_SCRIPTS: &[&str] = &[
     "sshd",
     "chronyd",
     "dhcpcd",
+    "iwd",
     "local",
 ];
 
@@ -270,6 +271,9 @@ pub static NETWORK: Component = Component {
             "dhcpcd",
             "# DHCP client configuration\ndhcpcd_args=\"--quiet\"\n",
         ),
+        // WiFi support (iwd)
+        dir("var/lib/iwd"),
+        openrc_enable("iwd", "default"),
     ],
 };
 
