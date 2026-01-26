@@ -48,6 +48,8 @@ struct IsoPaths {
     iso_output: PathBuf,
     iso_root: PathBuf,
     rootfs: PathBuf,
+    /// Custom-built kernel at output/staging/boot/vmlinuz
+    kernel: PathBuf,
 }
 
 impl IsoPaths {
@@ -60,6 +62,8 @@ impl IsoPaths {
             iso_output: output_dir.join(ISO_FILENAME),
             iso_root: output_dir.join("iso-root"),
             rootfs: paths.rootfs,
+            // Custom kernel from our build (stolen from leviso or built ourselves)
+            kernel: output_dir.join("staging/boot/vmlinuz"),
             output_dir,
         }
     }
@@ -135,13 +139,12 @@ fn validate_iso_inputs(paths: &IsoPaths) -> Result<()> {
         );
     }
 
-    // Check for kernel in rootfs
-    let kernel = paths.rootfs.join("boot/vmlinuz-lts");
-    if !kernel.exists() {
+    // Check for custom-built kernel
+    if !paths.kernel.exists() {
         bail!(
             "Kernel not found at {}.\n\
-             The rootfs may be incomplete.",
-            kernel.display()
+             Run 'acornos build kernel' first.",
+            paths.kernel.display()
         );
     }
 
@@ -169,7 +172,8 @@ fn create_live_overlay(output_dir: &Path) -> Result<()> {
     let profile_overlay = base_dir.join("profile/live-overlay");
     if profile_overlay.exists() {
         println!("  Copying profile/live-overlay (test instrumentation)...");
-        copy_dir_recursive(&profile_overlay, &live_overlay)?;
+        copy_dir_recursive(&profile_overlay, &live_overlay)
+            .with_context(|| format!("Failed to copy {} -> {}", profile_overlay.display(), live_overlay.display()))?;
     }
 
     // =========================================================================
@@ -177,7 +181,8 @@ fn create_live_overlay(output_dir: &Path) -> Result<()> {
     // =========================================================================
 
     // Create directory structure
-    fs::create_dir_all(live_overlay.join("etc"))?;
+    fs::create_dir_all(live_overlay.join("etc"))
+        .with_context(|| "Failed to create etc")?;
 
     // Create autologin script for serial console
     // This script is called by agetty -l to act as a login program replacement
@@ -229,9 +234,8 @@ exec /bin/sh -l
     // - Automatically logs in the specified user (root)
     // - Spawns a login shell which sources /etc/profile and /etc/profile.d/*
     // - This is the standard Alpine Linux approach (see wiki.alpinelinux.org/wiki/TTY_Autologin)
-    // NOTE: Serial console (ttyS0) is NOT in inittab - it's managed by the
-    // agetty.ttyS0 OpenRC service instead. This avoids duplicate respawn
-    // attempts between inittab and OpenRC.
+    // Serial console uses inittab directly since Alpine Extended doesn't include
+    // the openrc-agetty package that provides /etc/init.d/agetty
     let inittab_content = r#"# /etc/inittab - AcornOS Live
 
 ::sysinit:/sbin/openrc sysinit
@@ -246,8 +250,9 @@ tty4::respawn:/sbin/getty 38400 tty4
 tty5::respawn:/sbin/getty 38400 tty5
 tty6::respawn:/sbin/getty 38400 tty6
 
-# NOTE: ttyS0 is managed by agetty.ttyS0 OpenRC service (see /etc/conf.d/agetty.ttyS0)
-# Do NOT add a ttyS0 entry here - it would conflict with the service
+# Serial console with autologin for test harness
+# Uses wrapper script that spawns ash as login shell (sources /etc/profile.d/*)
+ttyS0::respawn:/sbin/getty -n -l /usr/local/bin/serial-autologin 115200 ttyS0 vt100
 
 # Ctrl+Alt+Del
 ::ctrlaltdel:/sbin/reboot
@@ -257,30 +262,16 @@ tty6::respawn:/sbin/getty 38400 tty6
 "#;
     fs::write(live_overlay.join("etc/inittab"), inittab_content)?;
 
-    // Enable services in default runlevel
+    // Ensure runlevels directory exists for services enabled via profile/live-overlay
     let runlevels_default = live_overlay.join("etc/runlevels/default");
     fs::create_dir_all(&runlevels_default)?;
-    std::os::unix::fs::symlink("/etc/init.d/local", runlevels_default.join("local"))?;
 
-    // Enable serial getty using OpenRC's agetty service
-    // Note: agetty -l specifies the login program, but we use a wrapper
-    // that invokes ash as a login shell since /bin/login doesn't exist in Alpine
-    let init_d = live_overlay.join("etc/init.d");
-    fs::create_dir_all(&init_d)?;
-    std::os::unix::fs::symlink("agetty", init_d.join("agetty.ttyS0"))?;
-    std::os::unix::fs::symlink("/etc/init.d/agetty.ttyS0", runlevels_default.join("agetty.ttyS0"))?;
+    // NOTE: Serial console is handled via inittab, not OpenRC service,
+    // since Alpine Extended doesn't include the openrc-agetty package.
 
-    // Configure serial getty with autologin using wrapper script
+    // Create conf.d directory for future service configuration
     let conf_d = live_overlay.join("etc/conf.d");
     fs::create_dir_all(&conf_d)?;
-    let agetty_conf = r#"# Serial console configuration for live boot
-baud="115200"
-term_type="vt100"
-# Use autologin wrapper that runs ash as login shell
-# -n skips login prompt, -l specifies login program
-agetty_options="-n -l /usr/local/bin/serial-autologin"
-"#;
-    fs::write(conf_d.join("agetty.ttyS0"), agetty_conf)?;
 
     // =========================================================================
     // P1: Volatile log storage
@@ -326,6 +317,23 @@ fi
     let mut perms = fs::metadata(&script_path)?.permissions();
     perms.set_mode(0o755);
     fs::set_permissions(&script_path, perms)?;
+
+    // Mount efivarfs if not already mounted (needed for bootctl, efibootmgr)
+    // The initramfs mount might not persist through switch_root properly
+    let efivars_script = r#"#!/bin/sh
+# Ensure efivarfs is mounted for UEFI support
+# Needed for efibootmgr, bootctl, and install tests
+
+if [ -d /sys/firmware/efi ]; then
+    mkdir -p /sys/firmware/efi/efivars 2>/dev/null
+    mount -t efivarfs efivarfs /sys/firmware/efi/efivars 2>/dev/null || true
+fi
+"#;
+    let efivars_script_path = live_overlay.join("etc/local.d/01-efivarfs.start");
+    fs::write(&efivars_script_path, efivars_script)?;
+    let mut perms = fs::metadata(&efivars_script_path)?.permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(&efivars_script_path, perms)?;
 
     // =========================================================================
     // P1: Do-not-suspend configuration
@@ -411,10 +419,9 @@ fn setup_iso_structure(paths: &IsoPaths) -> Result<()> {
 
 /// Stage 4: Copy kernel, initramfs, squashfs, and live overlay to ISO.
 fn copy_iso_artifacts(paths: &IsoPaths) -> Result<()> {
-    // Copy kernel from rootfs (Alpine linux-lts)
-    let kernel_src = paths.rootfs.join("boot/vmlinuz-lts");
-    println!("Copying kernel from {}...", kernel_src.display());
-    fs::copy(&kernel_src, paths.iso_root.join(KERNEL_ISO_PATH))?;
+    // Copy custom-built kernel (from output/staging/boot/vmlinuz)
+    println!("Copying kernel from {}...", paths.kernel.display());
+    fs::copy(&paths.kernel, paths.iso_root.join(KERNEL_ISO_PATH))?;
 
     // Copy live initramfs
     println!("Copying initramfs...");
@@ -443,8 +450,11 @@ fn copy_iso_artifacts(paths: &IsoPaths) -> Result<()> {
 
 /// Recursively copy a directory, preserving symlinks.
 fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
-    fs::create_dir_all(dst)?;
-    for entry in fs::read_dir(src)? {
+    fs::create_dir_all(dst)
+        .with_context(|| format!("Failed to create directory {}", dst.display()))?;
+    for entry in fs::read_dir(src)
+        .with_context(|| format!("Failed to read directory {}", src.display()))?
+    {
         let entry = entry?;
         let src_path = entry.path();
         let dst_path = dst.join(entry.file_name());
@@ -452,12 +462,21 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
 
         if file_type.is_symlink() {
             // Preserve symlinks (important for runlevel service links)
-            let target = fs::read_link(&src_path)?;
-            std::os::unix::fs::symlink(&target, &dst_path)?;
+            // Remove existing file/symlink if present
+            // Use symlink_metadata to detect broken symlinks (exists() follows the link)
+            if dst_path.symlink_metadata().is_ok() {
+                fs::remove_file(&dst_path)
+                    .with_context(|| format!("Failed to remove existing symlink {}", dst_path.display()))?;
+            }
+            let target = fs::read_link(&src_path)
+                .with_context(|| format!("Failed to read symlink {}", src_path.display()))?;
+            std::os::unix::fs::symlink(&target, &dst_path)
+                .with_context(|| format!("Failed to create symlink {} -> {}", dst_path.display(), target.display()))?;
         } else if file_type.is_dir() {
             copy_dir_recursive(&src_path, &dst_path)?;
         } else {
-            fs::copy(&src_path, &dst_path)?;
+            fs::copy(&src_path, &dst_path)
+                .with_context(|| format!("Failed to copy {} -> {}", src_path.display(), dst_path.display()))?;
         }
     }
     Ok(())

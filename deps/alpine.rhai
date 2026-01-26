@@ -197,56 +197,19 @@ fn build(ctx) {
         write_file(join_path(rootfs_temp, "etc/apk/repositories"), repo_content);
 
         // --allow-untrusted is safe here since we verified the ISO checksum
-        // Package installation is split into tiers to handle dependencies properly
+        // Only install Tier 0 here - supplementary packages are in packages.rhai
+
+        let apk_cmd = ctx.apk_static_path + " --root " + rootfs_temp;
+        let apk_init = apk_cmd + " --usermode --initdb --no-progress --allow-untrusted add ";
 
         // === Tier 0: Bootable Minimum ===
-        // Absolute minimum for kernel to boot and hand off to init
+        // This is the ONLY tier installed here. Tiers 1-3 are in packages.rhai
+        // for faster iteration when changing the package list.
         log("Installing Tier 0: Bootable minimum...");
-        shell(ctx.apk_static_path + " --root " + rootfs_temp + " --usermode --initdb --no-progress --allow-untrusted add " +
-            "alpine-base " +
-            "openrc openrc-init " +
-            "linux-lts " +
-            "grub grub-efi efibootmgr " +
-            "e2fsprogs dosfstools util-linux"
-        );
+        let tier0 = "alpine-base openrc openrc-init linux-lts grub grub-efi efibootmgr e2fsprogs dosfstools util-linux";
+        shell(apk_init + tier0);
 
-        // === Tier 1: Core System (P0 Requirements) ===
-        // Device management, firmware, storage, privilege escalation
-        log("Installing Tier 1: Core system...");
-        shell(ctx.apk_static_path + " --root " + rootfs_temp + " --usermode --no-progress --allow-untrusted add " +
-            "eudev eudev-openrc " +
-            "linux-firmware intel-ucode amd-ucode " +
-            "cryptsetup lvm2 btrfs-progs device-mapper " +
-            "util-linux-login " +
-            "bash coreutils " +
-            "doas " +
-            "grep sed gawk findutils"
-        );
-
-        // === Tier 2: Daily Driver (P1 Requirements) ===
-        // Networking, certificates, timezone, diagnostics
-        log("Installing Tier 2: Daily driver...");
-        shell(ctx.apk_static_path + " --root " + rootfs_temp + " --usermode --no-progress --allow-untrusted add " +
-            "dhcpcd iproute2 iputils " +
-            "iwd wireless-regdb " +
-            "ca-certificates " +
-            "tzdata " +
-            "curl less vim " +
-            "pciutils usbutils dmidecode ethtool smartmontools hdparm nvme-cli " +
-            "sof-firmware " +
-            "openssh chrony"
-        );
-
-        // === Tier 3: Live ISO Tools ===
-        // Partitioning and filesystem tools for installation
-        log("Installing Tier 3: Live ISO tools...");
-        shell(ctx.apk_static_path + " --root " + rootfs_temp + " --usermode --no-progress --allow-untrusted add " +
-            "parted sgdisk " +
-            "xfsprogs " +
-            "squashfs-tools"
-        );
-
-        log("Package installation complete");
+        log("Base package installation complete (run packages.rhai for supplementary packages)");
     }
 
     write_file(version_file, ctx.version);

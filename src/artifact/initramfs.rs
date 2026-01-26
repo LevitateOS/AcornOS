@@ -6,10 +6,10 @@
 //! - Kernel modules for boot
 //! - Minimal directory structure
 //!
-//! # Key Difference from leviso
+//! # Kernel Modules
 //!
-//! AcornOS uses Alpine's kernel which has modules compressed with gzip (.ko.gz)
-//! rather than xz (.ko.xz) like Rocky.
+//! Modules come from our custom kernel build at `output/staging/lib/modules/`.
+//! They use zstd compression (.ko.zst) from the kernel build process.
 //!
 //! # Boot Flow
 //!
@@ -27,8 +27,10 @@
 //! ```
 
 use anyhow::{bail, Context, Result};
+use sha2::{Digest, Sha256};
 use std::env;
 use std::fs;
+use std::io::Read;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
@@ -37,7 +39,32 @@ use distro_spec::acorn::{
     BOOT_DEVICE_PROBE_ORDER, BOOT_MODULES, CPIO_GZIP_LEVEL, INITRAMFS_BUILD_DIR, INITRAMFS_DIRS,
     INITRAMFS_LIVE_OUTPUT, ISO_LABEL, LIVE_OVERLAY_ISO_PATH, SQUASHFS_ISO_PATH,
 };
-use leviso_deps::download::verify_sha256;
+
+/// Verify SHA256 hash of a file.
+fn verify_sha256(file: &Path, expected: &str) -> Result<()> {
+    let mut f = fs::File::open(file).with_context(|| format!("cannot open {}", file.display()))?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0u8; 1024 * 1024]; // 1MB chunks
+
+    loop {
+        let n = f.read(&mut buffer)?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buffer[..n]);
+    }
+
+    let hash = hex::encode(hasher.finalize());
+    if hash != expected.to_lowercase() {
+        bail!(
+            "SHA256 integrity check failed for '{}'\n  expected: {}\n  got:      {}",
+            file.display(),
+            expected.to_lowercase(),
+            hash
+        );
+    }
+    Ok(())
+}
 
 // =============================================================================
 // Busybox Constants (canonical source: deps/alpine.rhai)
@@ -49,7 +76,6 @@ const BUSYBOX_SHA256: &str =
     "6e123e7f3202a8c1e9b1f94d8941580a25135382b99e8d3e34fb858bba311348";
 const BUSYBOX_URL_ENV: &str = "BUSYBOX_URL";
 
-use crate::extract::ExtractPaths;
 
 /// Get busybox download URL from environment or use default.
 fn busybox_url() -> String {
@@ -153,7 +179,7 @@ fn copy_busybox(base_dir: &Path, initramfs_root: &Path) -> Result<()> {
         // Verify checksum only for default URL (custom URLs may have different checksums)
         if is_default_url {
             println!("  Verifying checksum...");
-            verify_sha256(&busybox_cache, BUSYBOX_SHA256, false)
+            verify_sha256(&busybox_cache, BUSYBOX_SHA256)
                 .context("Busybox checksum verification failed")?;
         } else {
             println!("  Skipping checksum (custom URL)");
@@ -183,17 +209,27 @@ fn copy_busybox(base_dir: &Path, initramfs_root: &Path) -> Result<()> {
 
 /// Copy boot kernel modules to the initramfs.
 ///
-/// Alpine kernel modules use gzip compression (.ko.gz).
+/// Modules come from our custom kernel build at `output/staging/lib/modules/`.
+/// They use zstd compression (.ko.zst) from the kernel build process.
+///
+/// # Built-in vs Modular
+///
+/// Our kernel config compiles most boot-critical drivers as built-in (=y),
+/// not as loadable modules (=m). This means they're already in the kernel
+/// binary and don't need to be loaded from initramfs.
+///
+/// We still attempt to copy any modules that DO exist, but missing modules
+/// are assumed to be built-in and are not an error.
 fn copy_boot_modules(base_dir: &Path, initramfs_root: &Path) -> Result<()> {
     println!("Copying boot kernel modules...");
 
-    let paths = ExtractPaths::new(base_dir);
-    let modules_path = paths.rootfs.join("lib/modules");
+    // Modules are installed to output/staging/lib/modules/ by the kernel build
+    let modules_path = base_dir.join("output/staging/lib/modules");
 
     if !modules_path.exists() {
         bail!(
             "No kernel modules found at {}.\n\
-             Run 'acornos extract' first.",
+             Run 'acornos build kernel' first.",
             modules_path.display()
         );
     }
@@ -218,18 +254,22 @@ fn copy_boot_modules(base_dir: &Path, initramfs_root: &Path) -> Result<()> {
     let kmod_dst = initramfs_root.join("lib/modules").join(&kver);
     fs::create_dir_all(&kmod_dst)?;
 
-    // Copy each boot module - all are required
+    // Copy each boot module if it exists
+    // Missing modules are assumed to be built-in to the kernel (=y in kconfig)
     let mut copied = 0;
-    let mut missing = Vec::new();
+    let mut builtin = 0;
     for module_path in BOOT_MODULES {
         // Try to find the module with different extensions
+        // Our custom kernel build uses .ko.zst (zstd compression)
         let base_path = module_path
+            .trim_end_matches(".ko.zst")
             .trim_end_matches(".ko.xz")
             .trim_end_matches(".ko.gz")
             .trim_end_matches(".ko");
 
         let mut found = false;
-        for ext in [".ko", ".ko.gz", ".ko.xz"] {
+        // .ko.zst first - that's what our custom kernel build produces
+        for ext in [".ko.zst", ".ko", ".ko.gz", ".ko.xz"] {
             let src = kmod_src.join(format!("{}{}", base_path, ext));
             if src.exists() {
                 let dst = kmod_dst.join(format!("{}{}", base_path, ext));
@@ -242,25 +282,26 @@ fn copy_boot_modules(base_dir: &Path, initramfs_root: &Path) -> Result<()> {
         }
 
         if !found {
-            missing.push(*module_path);
+            // Module not found as .ko file - assume it's built-in to the kernel
+            builtin += 1;
         }
     }
 
-    // FAIL FAST if any module is missing
-    if !missing.is_empty() {
-        bail!(
-            "Boot modules missing: {:?}\n\
-             \n\
-             These kernel modules are REQUIRED for the ISO to boot:\n\
-             - cdrom, sr_mod, virtio_scsi, isofs (CDROM access)\n\
-             - loop, squashfs, overlay (squashfs + overlay boot)\n\
-             \n\
-             The Alpine rootfs may be incomplete.",
-            missing
-        );
+    if copied > 0 {
+        println!("  Copied {} boot modules", copied);
+    }
+    if builtin > 0 {
+        println!("  {} boot modules are built-in to kernel (no .ko files)", builtin);
     }
 
-    println!("  Copied {} boot modules", copied);
+    // Copy modules.dep and other metadata files for depmod
+    for meta_file in ["modules.dep", "modules.dep.bin", "modules.alias", "modules.alias.bin"] {
+        let src = kmod_src.join(meta_file);
+        if src.exists() {
+            fs::copy(&src, kmod_dst.join(meta_file))?;
+        }
+    }
+
     Ok(())
 }
 

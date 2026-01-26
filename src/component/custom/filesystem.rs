@@ -105,6 +105,82 @@ pub fn setup_device_manager(ctx: &BuildContext) -> Result<()> {
     Ok(())
 }
 
+/// Copy all shared libraries from source rootfs.
+///
+/// This is necessary because glibc's ldd can't analyze musl binaries,
+/// so we can't detect library dependencies automatically. We copy ALL
+/// shared libraries from the source rootfs to ensure binaries work.
+pub fn copy_all_libraries(ctx: &BuildContext) -> Result<()> {
+    let source = &ctx.source;
+    let staging = &ctx.staging;
+
+    // Library directories to copy
+    let lib_dirs = ["lib", "usr/lib"];
+
+    let mut copied = 0;
+    for lib_dir in lib_dirs {
+        let src_dir = source.join(lib_dir);
+        if !src_dir.exists() {
+            continue;
+        }
+
+        // Walk the directory and copy all .so files
+        copy_libraries_recursive(&src_dir, &src_dir, staging, lib_dir, &mut copied)?;
+    }
+
+    println!("  Copied {} shared libraries", copied);
+    Ok(())
+}
+
+/// Recursively copy shared libraries from a directory.
+fn copy_libraries_recursive(
+    base: &std::path::Path,
+    current: &std::path::Path,
+    staging: &std::path::Path,
+    dest_prefix: &str,
+    count: &mut usize,
+) -> Result<()> {
+    for entry in fs::read_dir(current)? {
+        let entry = entry?;
+        let path = entry.path();
+
+        if path.is_dir() {
+            // Recurse into subdirectories
+            copy_libraries_recursive(base, &path, staging, dest_prefix, count)?;
+        } else {
+            let name = entry.file_name().to_string_lossy().to_string();
+
+            // Copy .so files and symlinks
+            if name.contains(".so") {
+                // Calculate relative path from base
+                let rel_path = path.strip_prefix(base).unwrap_or(&path);
+                let dst_path = staging.join(dest_prefix).join(rel_path);
+
+                // Create parent directory
+                if let Some(parent) = dst_path.parent() {
+                    fs::create_dir_all(parent)?;
+                }
+
+                // Skip if already exists
+                if dst_path.exists() || dst_path.is_symlink() {
+                    continue;
+                }
+
+                if path.is_symlink() {
+                    // Copy symlink
+                    let target = fs::read_link(&path)?;
+                    std::os::unix::fs::symlink(&target, &dst_path)?;
+                } else {
+                    // Copy file
+                    fs::copy(&path, &dst_path)?;
+                }
+                *count += 1;
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Copy a directory tree recursively.
 fn copy_tree(src: &std::path::Path, dst: &std::path::Path) -> Result<()> {
     if !src.exists() {

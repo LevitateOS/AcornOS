@@ -192,12 +192,18 @@ pub enum CustomOp {
     CreateBusyboxApplets,
     /// Setup mdev or eudev device manager.
     SetupDeviceManager,
+    /// Copy kernel modules and run depmod.
+    CopyModules,
+    /// Run depmod for kernel modules.
+    RunDepmod,
     /// Copy WiFi firmware.
     CopyWifiFirmware,
     /// Copy all firmware.
     CopyAllFirmware,
     /// Create /etc configuration files.
     CreateEtcFiles,
+    /// Create security configuration (login.defs, etc.).
+    CreateSecurityConfig,
     /// Copy timezone data.
     CopyTimezoneData,
     /// Create welcome message for live ISO.
@@ -206,6 +212,9 @@ pub enum CustomOp {
     CreateLiveOverlay,
     /// Copy recstrap installer tools.
     CopyRecstrap,
+    /// Copy all shared libraries from source rootfs.
+    /// Required because host glibc ldd can't analyze musl binaries.
+    CopyAllLibraries,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

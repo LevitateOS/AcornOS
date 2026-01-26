@@ -252,21 +252,31 @@ busybox mount --move /dev /newroot/dev
 busybox mount --move /proc /newroot/proc
 busybox mount --move /sys /newroot/sys
 
+# Mount efivars for UEFI support (needed for efibootmgr, install tests, etc.)
+# Note: This mount may not persist through switch_root, so we also mount it
+# via /etc/local.d/01-efivarfs.start after OpenRC starts.
+if [ -d /newroot/sys/firmware/efi ]; then
+    busybox mkdir -p /newroot/sys/firmware/efi/efivars
+    busybox mount -t efivarfs efivarfs /newroot/sys/firmware/efi/efivars 2>/dev/null || true
+fi
+
 # Keep ISO mounted at /media/cdrom so recstrap can access filesystem.squashfs
 busybox mkdir -p /newroot/media/cdrom
 busybox mount --move /mnt /newroot/media/cdrom
 
-# Verify OpenRC init exists
-# Alpine uses /sbin/openrc-init as the init binary
+# Verify init exists
+# AcornOS uses /sbin/init (symlink to busybox) which reads /etc/inittab
+# and runs openrc via sysinit/wait actions. This is how Alpine boots.
 INIT_PATH=""
-if [ -x /newroot/sbin/openrc-init ]; then
-    INIT_PATH="/sbin/openrc-init"
-elif [ -x /newroot/sbin/init ]; then
+if [ -x /newroot/sbin/init ]; then
     INIT_PATH="/sbin/init"
+elif [ -x /newroot/sbin/openrc-init ]; then
+    # Fallback to openrc-init if /sbin/init doesn't exist
+    INIT_PATH="/sbin/openrc-init"
 else
     msg "Contents of /newroot/sbin:"
     busybox ls -la /newroot/sbin/
-    emergency_shell "/newroot/sbin/openrc-init not found or not executable"
+    emergency_shell "/newroot/sbin/init not found or not executable"
 fi
 
 # Final message before handoff

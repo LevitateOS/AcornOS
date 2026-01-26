@@ -1,6 +1,7 @@
 //! AcornOS ISO Builder CLI
 //!
-//! Builds AcornOS: an Alpine-based daily driver Linux distribution.
+//! Builds AcornOS: a daily driver Linux distribution using musl, busybox, and OpenRC.
+//! Packages are sourced from Alpine Linux repositories (APKs).
 //!
 //! # Usage
 //!
@@ -79,6 +80,12 @@ enum Commands {
 
 #[derive(Subcommand)]
 enum BuildArtifact {
+    /// Build the kernel from source
+    Kernel {
+        /// Clean build directory before building
+        #[arg(long)]
+        clean: bool,
+    },
     /// Build only the squashfs from rootfs
     Squashfs,
 }
@@ -88,6 +95,7 @@ fn main() {
 
     let result = match cli.command {
         Commands::Build { artifact } => match artifact {
+            Some(BuildArtifact::Kernel { clean }) => cmd_build_kernel(clean),
             Some(BuildArtifact::Squashfs) => cmd_build_squashfs(),
             None => cmd_build(),
         },
@@ -108,25 +116,55 @@ fn cmd_build() -> Result<()> {
     use std::time::Instant;
     use acornos::Timer;
 
-    // Full build: squashfs + initramfs + ISO
+    // Full build: kernel + squashfs + initramfs + ISO
     // Skips anything already built, rebuilds only on changes.
     let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let workspace_root = base_dir.parent().expect("AcornOS must be in workspace");
+    let linux_source = workspace_root.join("linux");
     let build_start = Instant::now();
 
     println!("=== Full AcornOS Build ===\n");
 
-    // 1. Build squashfs (skip if inputs unchanged)
+    // 1. Build kernel (skip if inputs unchanged)
+    let needs_compile = acornos::rebuild::kernel_needs_compile(&base_dir);
+    let needs_install = acornos::rebuild::kernel_needs_install(&base_dir);
+    let output_dir = base_dir.join("output");
+
+    if needs_compile {
+        if !linux_source.exists() || !linux_source.join("Makefile").exists() {
+            anyhow::bail!(
+                "Linux kernel source not found at {}\n\
+                 Run: git submodule update --init linux",
+                linux_source.display()
+            );
+        }
+        println!("Building kernel...");
+        let t = Timer::start("Kernel");
+        acornos::build::kernel::build_kernel(&linux_source, &output_dir, &base_dir)?;
+        acornos::build::kernel::install_kernel(&linux_source, &output_dir, &output_dir.join("staging"))?;
+        acornos::rebuild::cache_kernel_hash(&base_dir);
+        t.finish();
+    } else if needs_install {
+        println!("Installing kernel (compile skipped)...");
+        let t = Timer::start("Kernel install");
+        acornos::build::kernel::install_kernel(&linux_source, &output_dir, &output_dir.join("staging"))?;
+        t.finish();
+    } else {
+        println!("[SKIP] Kernel already built and installed");
+    }
+
+    // 2. Build squashfs (skip if inputs unchanged)
     if acornos::rebuild::squashfs_needs_rebuild(&base_dir) {
-        println!("Building squashfs system image...");
+        println!("\nBuilding squashfs system image...");
         let t = Timer::start("Squashfs");
         acornos::artifact::build_squashfs(&base_dir)?;
         acornos::rebuild::cache_squashfs_hash(&base_dir);
         t.finish();
     } else {
-        println!("[SKIP] Squashfs already built (inputs unchanged)");
+        println!("\n[SKIP] Squashfs already built (inputs unchanged)");
     }
 
-    // 2. Build initramfs (skip if inputs unchanged)
+    // 3. Build initramfs (skip if inputs unchanged)
     if acornos::rebuild::initramfs_needs_rebuild(&base_dir) {
         println!("\nBuilding tiny initramfs...");
         let t = Timer::start("Initramfs");
@@ -137,7 +175,7 @@ fn cmd_build() -> Result<()> {
         println!("\n[SKIP] Initramfs already built (inputs unchanged)");
     }
 
-    // 3. Build ISO (skip if components unchanged)
+    // 4. Build ISO (skip if components unchanged)
     if acornos::rebuild::iso_needs_rebuild(&base_dir) {
         println!("\nBuilding ISO...");
         let t = Timer::start("ISO");
@@ -155,6 +193,64 @@ fn cmd_build() -> Result<()> {
     }
     println!("  ISO: output/acornos.iso");
     println!("\nNext: acornos run");
+
+    Ok(())
+}
+
+fn cmd_build_kernel(clean: bool) -> Result<()> {
+    use acornos::Timer;
+
+    let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    // Linux kernel source is at the workspace root (shared with leviso)
+    let workspace_root = base_dir.parent().expect("AcornOS must be in workspace");
+    let linux_source = workspace_root.join("linux");
+
+    if !linux_source.exists() || !linux_source.join("Makefile").exists() {
+        anyhow::bail!(
+            "Linux kernel source not found at {}\n\
+             Run: git submodule update --init linux",
+            linux_source.display()
+        );
+    }
+
+    let output_dir = base_dir.join("output");
+    let needs_compile = clean || acornos::rebuild::kernel_needs_compile(&base_dir);
+    let needs_install = acornos::rebuild::kernel_needs_install(&base_dir);
+
+    if needs_compile {
+        if clean {
+            let kernel_build = output_dir.join("kernel-build");
+            if kernel_build.exists() {
+                println!("Cleaning kernel build directory...");
+                std::fs::remove_dir_all(&kernel_build)?;
+            }
+        }
+
+        println!("Building kernel...");
+        let t = Timer::start("Kernel");
+        let version = acornos::build::kernel::build_kernel(&linux_source, &output_dir, &base_dir)?;
+        acornos::build::kernel::install_kernel(&linux_source, &output_dir, &output_dir.join("staging"))?;
+        acornos::rebuild::cache_kernel_hash(&base_dir);
+        t.finish();
+
+        println!("\n=== Kernel build complete ===");
+        println!("  Version: {}", version);
+        println!("  Kernel:  output/staging/boot/vmlinuz");
+        println!("  Modules: output/staging/lib/modules/{}/", version);
+    } else if needs_install {
+        println!("Installing kernel (compile skipped)...");
+        let t = Timer::start("Kernel install");
+        let version = acornos::build::kernel::install_kernel(&linux_source, &output_dir, &output_dir.join("staging"))?;
+        t.finish();
+
+        println!("\n=== Kernel install complete ===");
+        println!("  Version: {}", version);
+        println!("  Kernel:  output/staging/boot/vmlinuz");
+        println!("  Modules: output/staging/lib/modules/{}/", version);
+    } else {
+        println!("[SKIP] Kernel already built and installed");
+        println!("  Use 'build kernel --clean' to force rebuild");
+    }
 
     Ok(())
 }
@@ -263,13 +359,50 @@ fn cmd_status() -> Result<()> {
     }
     println!();
 
+    // Check Linux kernel source
+    let workspace_root = base_dir.parent().expect("AcornOS must be in workspace");
+    let linux_source = workspace_root.join("linux");
+    println!("Kernel Source:");
+    if linux_source.exists() && linux_source.join("Makefile").exists() {
+        println!("  Linux source:    FOUND at {}", linux_source.display());
+    } else {
+        println!("  Linux source:    NOT FOUND (run 'git submodule update --init linux')");
+    }
+    let kconfig = base_dir.join("kconfig");
+    if kconfig.exists() {
+        println!("  kconfig:         FOUND at {}", kconfig.display());
+    } else {
+        println!("  kconfig:         NOT FOUND");
+    }
+
+    // Check if we can steal kernel from LevitateOS
+    let leviso_bzimage = workspace_root.join("leviso/output/kernel-build/arch/x86/boot/bzImage");
+    if leviso_bzimage.exists() {
+        println!("  LevitateOS:      KERNEL AVAILABLE (can steal instead of building)");
+    }
+    println!();
+
     // Check build artifacts
     let output_dir = base_dir.join("output");
+    let kernel = output_dir.join("staging/boot/vmlinuz");
+    let kernel_build = output_dir.join("kernel-build");
     let squashfs = output_dir.join("filesystem.squashfs");
     let initramfs = output_dir.join("initramfs-live.cpio.gz");
     let iso = output_dir.join("acornos.iso");
 
     println!("Build Artifacts:");
+    if kernel.exists() {
+        let size = std::fs::metadata(&kernel).map(|m| m.len() / 1024 / 1024).unwrap_or(0);
+        // Check if kernel-build is a symlink (stolen from leviso)
+        let stolen = kernel_build.is_symlink();
+        if stolen {
+            println!("  Kernel:          STOLEN from LevitateOS ({} MB)", size);
+        } else {
+            println!("  Kernel:          BUILT ({} MB)", size);
+        }
+    } else {
+        println!("  Kernel:          NOT BUILT");
+    }
     if squashfs.exists() {
         let size = std::fs::metadata(&squashfs).map(|m| m.len() / 1024 / 1024).unwrap_or(0);
         println!("  Squashfs:        BUILT ({} MB)", size);
@@ -291,8 +424,12 @@ fn cmd_status() -> Result<()> {
     println!();
 
     println!("Next steps:");
-    if !paths.rootfs.exists() {
-        println!("  1. Run 'recipe resolve deps/alpine.rhai' to download and create rootfs");
+    if !linux_source.exists() {
+        println!("  1. Run 'git submodule update --init linux' to get kernel source");
+    } else if !paths.rootfs.exists() {
+        println!("  1. Run 'recipe install deps/alpine.rhai' to download and create rootfs");
+    } else if !kernel.exists() {
+        println!("  1. Run 'acornos build kernel' to build the kernel");
     } else if !squashfs.exists() {
         println!("  1. Run 'acornos build squashfs' to create filesystem.squashfs");
     } else if !initramfs.exists() {

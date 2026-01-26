@@ -70,9 +70,12 @@ fn execute_op(ctx: &BuildContext, op: &Op) -> Result<()> {
             if let Some(parent) = link_path.parent() {
                 fs::create_dir_all(parent)?;
             }
-            if !link_path.exists() && !link_path.is_symlink() {
-                std::os::unix::fs::symlink(target, &link_path)?;
+            // Always overwrite existing symlinks - later components take precedence
+            // This is CRITICAL for /sbin/init: busybox creates it, OpenRC must override
+            if link_path.is_symlink() || link_path.exists() {
+                fs::remove_file(&link_path)?;
             }
+            std::os::unix::fs::symlink(target, &link_path)?;
         }
 
         Op::CopyFile(path) => {
@@ -105,14 +108,14 @@ fn execute_op(ctx: &BuildContext, op: &Op) -> Result<()> {
         }
 
         Op::Bins(names) => {
-            let mut missing = Vec::new();
+            let mut errors = Vec::new();
             for name in *names {
-                if let Err(_) = copy_binary(ctx, name, "usr/bin") {
-                    missing.push(*name);
+                if let Err(e) = copy_binary(ctx, name, "usr/bin") {
+                    errors.push(format!("{}: {}", name, e));
                 }
             }
-            if !missing.is_empty() {
-                bail!("Missing binaries: {}", missing.join(", "));
+            if !errors.is_empty() {
+                bail!("Missing binaries:\n  {}", errors.join("\n  "));
             }
         }
 
@@ -182,9 +185,19 @@ fn execute_op(ctx: &BuildContext, op: &Op) -> Result<()> {
 /// For Alpine/musl, libraries are in /usr/lib (not /usr/lib64).
 fn copy_binary(ctx: &BuildContext, name: &str, dest_dir: &str) -> Result<()> {
     // Find the binary in source
-    let src_path = ctx
-        .find_binary(name)
-        .ok_or_else(|| anyhow::anyhow!("binary not found: {}", name))?;
+    let src_path = ctx.find_binary(name).ok_or_else(|| {
+        // Debug: list what's in the source directory
+        let usr_bin = ctx.source.join("usr/bin").join(name);
+        let bin = ctx.source.join("bin").join(name);
+        anyhow::anyhow!(
+            "binary not found: {} (checked {} [exists={}] and {} [exists={}])",
+            name,
+            usr_bin.display(),
+            usr_bin.exists(),
+            bin.display(),
+            bin.exists()
+        )
+    })?;
 
     let src = ctx.source.join(&src_path);
     let dst = ctx.staging.join(dest_dir).join(name);
@@ -204,12 +217,17 @@ fn copy_binary(ctx: &BuildContext, name: &str, dest_dir: &str) -> Result<()> {
         return Ok(());
     }
 
+    // Remove existing file/symlink at destination (might be busybox applet)
+    if dst.exists() || dst.is_symlink() {
+        fs::remove_file(&dst)?;
+    }
+
     // Copy the binary
-    fs::copy(&src, &dst)?;
+    fs::copy(&src, &dst).with_context(|| format!("copying {} to {}", src.display(), dst.display()))?;
     make_executable(&dst)?;
 
     // Copy library dependencies (musl-based)
-    copy_library_deps(ctx, &src)?;
+    copy_library_deps(ctx, &src).with_context(|| format!("copying libs for {}", name))?;
 
     Ok(())
 }

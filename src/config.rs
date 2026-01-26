@@ -15,12 +15,23 @@
 //! ```
 
 use distro_builder::build::context::{DistroConfig, InitSystem};
+use distro_builder::KernelInstallConfig;
 
 /// AcornOS distribution configuration.
 ///
 /// This struct implements [`DistroConfig`] by delegating to
 /// constants defined in [`distro_spec::acorn`].
 pub struct AcornConfig;
+
+impl KernelInstallConfig for AcornConfig {
+    fn module_install_path(&self) -> &str {
+        distro_spec::acorn::MODULE_INSTALL_PATH
+    }
+
+    fn kernel_filename(&self) -> &str {
+        distro_spec::acorn::KERNEL_FILENAME
+    }
+}
 
 impl DistroConfig for AcornConfig {
     fn os_name(&self) -> &str {

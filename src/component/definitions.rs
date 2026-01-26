@@ -16,7 +16,7 @@ use distro_builder::component::Phase;
 
 use super::{
     bin, bins, copy_tree, custom, dir, dir_mode, dirs, group, openrc_conf, openrc_enable,
-    openrc_scripts, sbins, user, write_file, write_file_mode, Component, CustomOp,
+    openrc_scripts, sbins, symlink, user, write_file, write_file_mode, Component, CustomOp,
 };
 
 // =============================================================================
@@ -61,7 +61,7 @@ const FHS_DIRS: &[&str] = &[
 
 /// Filesystem setup component.
 ///
-/// Creates FHS directories and merged-usr symlinks.
+/// Creates FHS directories, merged-usr symlinks, and copies musl libc.
 pub static FILESYSTEM: Component = Component {
     name: "filesystem",
     phase: Phase::Filesystem,
@@ -75,6 +75,10 @@ pub static FILESYSTEM: Component = Component {
         dir_mode("var/tmp", 0o1777),
         // /root with restricted permissions
         dir_mode("root", 0o700),
+        // CRITICAL: Copy ALL shared libraries from source rootfs
+        // Host ldd (glibc) can't detect musl dependencies, so we copy everything
+        // This MUST happen before any binaries are copied
+        custom(CustomOp::CopyAllLibraries),
     ],
 };
 
@@ -111,9 +115,18 @@ const ADDITIONAL_BINS: &[&str] = &[
     // System utilities
     "less",
     "htop",
+    // SSH utilities (for sshd)
+    "ssh-keygen",
 ];
 
 const ADDITIONAL_SBINS: &[&str] = &[
+    // OpenRC init system (CRITICAL - these must be copied before OPENRC component)
+    "openrc",
+    "openrc-init",
+    "openrc-run",
+    "openrc-shutdown",
+    // OpenRC utilities (used by init scripts)
+    "start-stop-daemon",
     // Login (required for inittab)
     "agetty",
     // Partitioning
@@ -133,6 +146,9 @@ const ADDITIONAL_SBINS: &[&str] = &[
     // Network
     "ip",
     "dhcpcd",
+    // Services
+    "chronyd",
+    "sshd",
 ];
 
 /// Additional utilities component.
@@ -171,7 +187,9 @@ const OPENRC_SCRIPTS: &[&str] = &[
     "sysfs",
     "swap",
     "swclock",
-    "urandom",
+    // Device manager (provides 'dev' service needed by hwdrivers)
+    "mdev",
+    // Note: urandom doesn't exist in Alpine - seedrng handles random seed
     // Services
     "sshd",
     "chronyd",
@@ -200,12 +218,22 @@ pub static OPENRC: Component = Component {
         dir("etc/init.d"),
         dir("etc/conf.d"),
         dirs(RUNLEVEL_DIRS),
+        // CRITICAL: /sbin/init must point to busybox (not openrc-init!)
+        // Busybox init reads /etc/inittab and:
+        // 1. Runs openrc via ::sysinit: lines
+        // 2. Spawns gettys via ::respawn: lines
+        // openrc-init does NOT properly handle inittab respawn lines
+        symlink("sbin/init", "/bin/busybox"),
+        // Copy OpenRC support scripts and binaries
+        // These are REQUIRED for OpenRC to function
+        copy_tree("usr/libexec/rc"),
         // Copy OpenRC configuration
         copy_tree("etc/rc.conf"),
         // Copy init scripts
         openrc_scripts(OPENRC_SCRIPTS),
         // Enable boot services (sysinit)
         openrc_enable("devfs", "sysinit"),
+        openrc_enable("mdev", "sysinit"), // Device manager - provides 'dev' service, creates /dev/ttyS0 etc.
         openrc_enable("dmesg", "sysinit"),
         openrc_enable("hwdrivers", "sysinit"),
         openrc_enable("modules", "sysinit"),
@@ -221,7 +249,6 @@ pub static OPENRC: Component = Component {
         openrc_enable("root", "boot"),
         openrc_enable("swap", "boot"),
         openrc_enable("seedrng", "boot"),
-        openrc_enable("urandom", "boot"),
         // Enable shutdown services
         openrc_enable("killprocs", "shutdown"),
         openrc_enable("mount-ro", "shutdown"),
@@ -245,9 +272,32 @@ pub static DEVICE_MANAGER: Component = Component {
     ],
 };
 
+/// Kernel modules component.
+///
+/// Copies kernel modules from staging and runs depmod.
+pub static MODULES: Component = Component {
+    name: "modules",
+    phase: Phase::Init,
+    ops: &[
+        // Copy kernel modules to squashfs root
+        custom(CustomOp::CopyModules),
+    ],
+};
+
 // =============================================================================
 // Phase 5: Services
 // =============================================================================
+
+/// Basic /etc/network/interfaces for Alpine networking.
+const NETWORK_INTERFACES: &str = "# /etc/network/interfaces - AcornOS
+auto lo
+iface lo inet loopback
+
+# Enable DHCP on common interface names
+# eth0 for QEMU virtio-net, enp* for real hardware
+auto eth0
+iface eth0 inet dhcp
+";
 
 /// Network component.
 pub static NETWORK: Component = Component {
@@ -260,6 +310,8 @@ pub static NETWORK: Component = Component {
         dir("etc/network/if-post-down.d"),
         dir("etc/network/if-pre-up.d"),
         dir("etc/network/if-up.d"),
+        // Basic network interfaces file
+        write_file("etc/network/interfaces", NETWORK_INTERFACES),
         // Copy network configuration
         copy_tree("etc/network"),
         // Enable networking service
@@ -272,8 +324,10 @@ pub static NETWORK: Component = Component {
             "# DHCP client configuration\ndhcpcd_args=\"--quiet\"\n",
         ),
         // WiFi support (iwd)
+        // DISABLED: iwd needs dbus which isn't installed
+        // TODO: Install dbus and re-enable
         dir("var/lib/iwd"),
-        openrc_enable("iwd", "default"),
+        // openrc_enable("iwd", "default"),
     ],
 };
 
@@ -291,8 +345,9 @@ pub static SSH: Component = Component {
         // sshd user and group
         group("sshd", 22),
         user("sshd", 22, 22, "/var/empty/sshd", "/sbin/nologin"),
-        // Enable SSH (optional - can be disabled)
-        openrc_enable("sshd", "default"),
+        // DISABLED: sshd needs more files (/usr/lib/ssh/sshd-session)
+        // TODO: Fix sshd dependencies and re-enable
+        // openrc_enable("sshd", "default"),
     ],
 };
 
@@ -309,8 +364,9 @@ pub static CHRONY: Component = Component {
         // chrony user
         group("chrony", 123),
         user("chrony", 123, 123, "/var/lib/chrony", "/sbin/nologin"),
-        // Enable chrony
-        openrc_enable("chronyd", "default"),
+        // DISABLED: chronyd needs config file
+        // TODO: Create /etc/chrony/chrony.conf and re-enable
+        // openrc_enable("chronyd", "default"),
     ],
 };
 
@@ -365,8 +421,28 @@ pub static BRANDING: Component = Component {
         ),
         // Create /etc configuration files
         custom(CustomOp::CreateEtcFiles),
+        // Security configuration (login.defs, doas.conf)
+        custom(CustomOp::CreateSecurityConfig),
     ],
 };
+
+/// Base inittab content (standard login, no autologin).
+/// This is for installed systems. LIVE_FINAL overrides this with autologin.
+const BASE_INITTAB: &str = "# /etc/inittab - AcornOS\n\n\
+::sysinit:/sbin/openrc sysinit\n\
+::sysinit:/sbin/openrc boot\n\
+::wait:/sbin/openrc default\n\n\
+# Standard login on TTYs (no autologin for installed systems)\n\
+tty1::respawn:/sbin/agetty --noclear tty1 linux\n\
+tty2::respawn:/sbin/agetty tty2 linux\n\
+tty3::respawn:/sbin/agetty tty3 linux\n\
+tty4::respawn:/sbin/agetty tty4 linux\n\
+tty5::respawn:/sbin/agetty tty5 linux\n\
+tty6::respawn:/sbin/agetty tty6 linux\n\n\
+# Serial console\n\
+ttyS0::respawn:/sbin/agetty -L 115200 ttyS0 vt100\n\n\
+::shutdown:/sbin/openrc shutdown\n\
+::ctrlaltdel:/sbin/reboot\n";
 
 /// System configuration component.
 pub static SYSCONFIG: Component = Component {
@@ -388,6 +464,9 @@ pub static SYSCONFIG: Component = Component {
             "etc/shells",
             "/bin/sh\n/bin/ash\n/bin/bash\n/usr/bin/bash\n",
         ),
+        // CRITICAL: Base inittab for all systems (installed and live)
+        // LIVE_FINAL overrides this with autologin version for live ISO
+        write_file_mode("etc/inittab", BASE_INITTAB, 0o644),
         // Copy timezone data
         custom(CustomOp::CopyTimezoneData),
     ],
@@ -424,19 +503,19 @@ pub static LIVE_FINAL: Component = Component {
         custom(CustomOp::CreateLiveOverlay),
         // Installer tools
         custom(CustomOp::CopyRecstrap),
-        // Root autologin for live
+        // Root autologin for live (both tty1 AND serial for testing)
         write_file_mode(
             "etc/inittab",
             "# /etc/inittab - AcornOS Live\n\n\
              ::sysinit:/sbin/openrc sysinit\n\
              ::sysinit:/sbin/openrc boot\n\
              ::wait:/sbin/openrc default\n\n\
-             # Autologin as root on tty1\n\
+             # Autologin as root on tty1 (VGA console)\n\
              tty1::respawn:/sbin/agetty --autologin root --noclear tty1 linux\n\
              tty2::respawn:/sbin/agetty tty2 linux\n\
              tty3::respawn:/sbin/agetty tty3 linux\n\n\
-             # Serial console\n\
-             ttyS0::respawn:/sbin/agetty -L 115200 ttyS0 vt100\n\n\
+             # Serial console with autologin for QEMU testing\n\
+             ttyS0::respawn:/sbin/agetty --autologin root -L 115200 ttyS0 vt100\n\n\
              ::shutdown:/sbin/openrc shutdown\n\
              ::ctrlaltdel:/sbin/reboot\n",
             0o644,
@@ -460,6 +539,7 @@ pub static ALL_COMPONENTS: &[&Component] = &[
     // Phase 3: Init
     &OPENRC,
     &DEVICE_MANAGER,
+    &MODULES,
     // Phase 5: Services
     &NETWORK,
     &SSH,

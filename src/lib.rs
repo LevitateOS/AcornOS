@@ -34,6 +34,7 @@
 //! ```
 
 pub mod artifact;
+pub mod build;
 pub mod cache;
 pub mod component;
 pub mod config;

@@ -8,6 +8,7 @@ mod busybox;
 mod filesystem;
 mod firmware;
 mod live;
+mod modules;
 
 use anyhow::Result;
 
@@ -24,12 +25,17 @@ pub fn execute(ctx: &BuildContext, op: CustomOp) -> Result<()> {
         CustomOp::CreateOsRelease => branding::create_os_release(ctx),
         CustomOp::CreateBranding => branding::create_branding(ctx),
         CustomOp::CreateEtcFiles => branding::create_etc_files(ctx),
+        CustomOp::CreateSecurityConfig => branding::create_security_config(ctx),
 
         // Busybox
         CustomOp::CreateBusyboxApplets => busybox::create_applet_symlinks(ctx),
 
         // Device manager
         CustomOp::SetupDeviceManager => filesystem::setup_device_manager(ctx),
+
+        // Kernel modules
+        CustomOp::CopyModules => modules::copy_modules(ctx),
+        CustomOp::RunDepmod => modules::run_depmod(ctx),
 
         // Firmware
         CustomOp::CopyWifiFirmware => firmware::copy_wifi_firmware(ctx),
@@ -42,5 +48,8 @@ pub fn execute(ctx: &BuildContext, op: CustomOp) -> Result<()> {
         CustomOp::CreateWelcomeMessage => live::create_welcome_message(ctx),
         CustomOp::CreateLiveOverlay => live::create_live_overlay(ctx),
         CustomOp::CopyRecstrap => live::copy_recstrap(ctx),
+
+        // Libraries
+        CustomOp::CopyAllLibraries => filesystem::copy_all_libraries(ctx),
     }
 }
