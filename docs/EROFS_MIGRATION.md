@@ -1,8 +1,12 @@
 # AcornOS EROFS Migration Plan
 
-**Status:** PLANNED
+**Status:** PHASE 2 COMPLETE
 **Priority:** P2
-**Prerequisite:** Complete end-to-end testing of current squashfs implementation
+**Completed Phases:**
+- Phase 0: EROFS code extracted to distro-builder ✓
+- Phase 1: distro-spec constants added ✓
+- Phase 2: AcornOS migration complete ✓
+- Phase 3: Verification PENDING (boot test required)
 
 ---
 
@@ -468,33 +472,33 @@ Update any squashfs path references to use ROOTFS constants.
 
 ## Order of Operations
 
-### Phase 0: Extract to distro-builder (BLOCKS everything else)
+### Phase 0: Extract to distro-builder ✓ COMPLETE
 
-1. **Extract `create_erofs()` to distro-builder** - Move from leviso
-2. **Delete `build_squashfs()` from distro-builder** - It's a reward hack placeholder
-3. **Update leviso to use shared code** - Thin wrapper only
-4. **Verify leviso still builds** - `cd leviso && cargo build && cargo test`
+1. ✓ **Extract `create_erofs()` to distro-builder** - Move from leviso
+2. ✓ **Delete `build_squashfs()` from distro-builder** - It's a reward hack placeholder
+3. ✓ **Update leviso to use shared code** - Thin wrapper only
+4. ✓ **Verify leviso still builds** - `cd leviso && cargo build && cargo test`
 
-### Phase 1: distro-spec constants
+### Phase 1: distro-spec constants ✓ COMPLETE
 
-5. **Add EROFS constants to `distro-spec/src/acorn/paths.rs`**
-6. **Export from `distro-spec/src/acorn/mod.rs`** - NO squashfs exports
+5. ✓ **Add EROFS constants to `distro-spec/src/acorn/paths.rs`**
+6. ✓ **Export from `distro-spec/src/acorn/mod.rs`** - NO squashfs exports
 
-### Phase 2: AcornOS migration
+### Phase 2: AcornOS migration ✓ COMPLETE
 
-7. **DELETE `AcornOS/src/artifact/squashfs.rs`** - Not rename, DELETE
-8. **CREATE `AcornOS/src/artifact/rootfs.rs`** - Thin wrapper using distro-builder
-9. **Update `AcornOS/src/artifact/mod.rs`** - Export build_rootfs
-10. **Update `AcornOS/src/rebuild.rs`** - Rename functions and paths
-11. **Update `AcornOS/src/main.rs`** - CLI commands
-12. **Update init template** - Mount point and filesystem type
-13. **Update documentation**
+7. ✓ **DELETE `AcornOS/src/artifact/squashfs.rs`** - Not rename, DELETE
+8. ✓ **CREATE `AcornOS/src/artifact/rootfs.rs`** - Thin wrapper using distro-builder
+9. ✓ **Update `AcornOS/src/artifact/mod.rs`** - Export build_rootfs
+10. ✓ **Update `AcornOS/src/rebuild.rs`** - Rename functions and paths
+11. ✓ **Update `AcornOS/src/main.rs`** - CLI commands
+12. ✓ **Update init template** - Mount point and filesystem type
+13. ✓ **Update documentation**
 
-### Phase 3: Verification
+### Phase 3: Verification (PENDING)
 
-14. **Build test** - `cd AcornOS && cargo build`
-15. **Unit tests** - `cargo test`
-16. **Full build** - `cargo run -- build`
+14. ✓ **Build test** - `cd AcornOS && cargo build`
+15. ✓ **Unit tests** - `cargo test`
+16. **Full build** - `cargo run -- build` (requires Alpine rootfs)
 17. **Boot test** - `cargo run -- run`
 18. **Run reward hack detection script**
 
