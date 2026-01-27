@@ -279,7 +279,7 @@ pub static MODULES: Component = Component {
     name: "modules",
     phase: Phase::Init,
     ops: &[
-        // Copy kernel modules to squashfs root
+        // Copy kernel modules to EROFS staging root
         custom(CustomOp::CopyModules),
     ],
 };

@@ -61,9 +61,9 @@ impl BuildContext {
     /// Create a build context from a base directory, creating a staging directory.
     ///
     /// This is a convenience method that creates the staging directory
-    /// at `output/squashfs-root`.
+    /// at `output/rootfs`.
     pub fn from_base_dir(base_dir: &Path) -> Result<Self> {
-        let staging = base_dir.join("output").join("squashfs-root");
+        let staging = base_dir.join("output").join("rootfs");
         Self::new(base_dir, &staging)
     }
 

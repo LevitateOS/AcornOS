@@ -2,7 +2,7 @@
 //!
 //! Creates a minimal initramfs containing only:
 //! - Static busybox binary (~1MB)
-//! - /init script (shell script that mounts squashfs)
+//! - /init script (shell script that mounts EROFS)
 //! - Kernel modules for boot
 //! - Minimal directory structure
 //!
@@ -20,8 +20,8 @@
 //!    a. Mount /proc, /sys, /dev
 //!    b. Find boot device by LABEL=ACORNOS
 //!    c. Mount ISO read-only
-//!    d. Mount filesystem.squashfs via loop device
-//!    e. Create overlay: squashfs (lower) + tmpfs (upper)
+//!    d. Mount filesystem.erofs via loop device
+//!    e. Create overlay: EROFS (lower) + tmpfs (upper)
 //!    f. switch_root to overlay
 //! 4. OpenRC (PID 1) takes over
 //! ```
@@ -35,10 +35,11 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 use distro_builder::artifact::cpio::build_cpio;
+use distro_builder::artifact::filesystem::{atomic_move, create_initramfs_dirs};
 use distro_builder::process::Cmd;
 use distro_spec::acorn::{
     BOOT_DEVICE_PROBE_ORDER, BOOT_MODULES, CPIO_GZIP_LEVEL, INITRAMFS_BUILD_DIR, INITRAMFS_DIRS,
-    INITRAMFS_LIVE_OUTPUT, ISO_LABEL, LIVE_OVERLAY_ISO_PATH, SQUASHFS_ISO_PATH,
+    INITRAMFS_LIVE_OUTPUT, ISO_LABEL, LIVE_OVERLAY_ISO_PATH, ROOTFS_ISO_PATH,
 };
 
 /// Verify SHA256 hash of a file.
@@ -124,8 +125,8 @@ pub fn build_tiny_initramfs(base_dir: &Path) -> Result<()> {
         bail!("Initramfs build produced invalid or empty file");
     }
 
-    // Atomic rename to final destination
-    fs::rename(&temp_cpio, &output_cpio)?;
+    // Atomic move to final destination (with cross-filesystem fallback)
+    atomic_move(&temp_cpio, &output_cpio)?;
 
     let size = fs::metadata(&output_cpio)?.len();
     println!("\n=== Tiny Initramfs Complete ===");
@@ -135,18 +136,17 @@ pub fn build_tiny_initramfs(base_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Create minimal directory structure.
+/// Create minimal directory structure using shared infrastructure.
 fn create_directory_structure(root: &Path) -> Result<()> {
     println!("Creating directory structure...");
 
-    for dir in INITRAMFS_DIRS {
-        fs::create_dir_all(root.join(dir))?;
-    }
+    // Use shared create_initramfs_dirs() from distro-builder
+    // INITRAMFS_DIRS from distro-spec contains standard dirs (bin, dev, proc, sys, etc.)
+    // The shared function also handles standard dirs, so we pass INITRAMFS_DIRS as extra
+    create_initramfs_dirs(root, INITRAMFS_DIRS)?;
 
-    // Create /dev directory
-    // Device nodes will be added via gen_init_cpio (doesn't require root)
+    // Add note about device nodes
     let dev = root.join("dev");
-    fs::create_dir_all(&dev)?;
     fs::write(
         dev.join(".note"),
         "# Device nodes are created by gen_init_cpio or devtmpfs\n",
@@ -330,7 +330,7 @@ fn generate_init_script(base_dir: &Path) -> Result<String> {
         .with_context(|| format!("Failed to read init_tiny.template at {}", template_path.display()))?;
 
     // Extract module names from full paths
-    // e.g., "kernel/fs/squashfs/squashfs.ko.gz" -> "squashfs"
+    // e.g., "kernel/fs/erofs/erofs.ko.gz" -> "erofs"
     let module_names: Vec<&str> = BOOT_MODULES
         .iter()
         .filter_map(|m| m.rsplit('/').next())
@@ -339,7 +339,7 @@ fn generate_init_script(base_dir: &Path) -> Result<String> {
 
     Ok(template
         .replace("{{ISO_LABEL}}", ISO_LABEL)
-        .replace("{{SQUASHFS_PATH}}", &format!("/{}", SQUASHFS_ISO_PATH))
+        .replace("{{ROOTFS_PATH}}", &format!("/{}", ROOTFS_ISO_PATH))
         .replace("{{BOOT_MODULES}}", &module_names.join(" "))
         .replace("{{BOOT_DEVICES}}", &BOOT_DEVICE_PROBE_ORDER.join(" "))
         .replace(

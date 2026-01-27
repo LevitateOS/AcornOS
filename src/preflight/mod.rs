@@ -5,7 +5,7 @@
 //!
 //! # Checks Performed
 //!
-//! - **Host tools**: 7z, tar, mksquashfs, xorriso are installed
+//! - **Host tools**: 7z, tar, mkfs.erofs, xorriso are installed
 //! - **Network**: Alpine mirror is reachable
 //! - **Disk space**: Sufficient space for downloads and build artifacts
 //! - **Cache status**: Reports what's already downloaded

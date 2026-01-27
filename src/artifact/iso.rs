@@ -1,8 +1,8 @@
 //! ISO creation - builds bootable AcornOS ISO.
 //!
-//! Creates an ISO with squashfs-based architecture:
-//! - Tiny initramfs (~5MB) - mounts squashfs + overlay
-//! - Squashfs image (~200MB) - complete base system
+//! Creates an ISO with EROFS-based architecture:
+//! - Tiny initramfs (~5MB) - mounts EROFS + overlay
+//! - EROFS image (~200MB) - complete base system
 //! - Live overlay - live-specific configs (autologin, serial console, empty root password)
 
 use anyhow::{bail, Context, Result};
@@ -11,7 +11,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 // Use shared infrastructure from distro-builder
-use distro_builder::artifact::filesystem::copy_dir_recursive;
+use distro_builder::artifact::filesystem::{atomic_move, copy_dir_recursive};
 use distro_builder::artifact::iso_utils::{
     create_efi_dirs_in_fat, create_fat16_image, generate_iso_checksum, mcopy_to_fat, run_xorriso,
     setup_iso_structure,
@@ -20,8 +20,8 @@ use distro_builder::process::Cmd;
 use distro_spec::acorn::{
     // Identity
     ISO_FILENAME, ISO_LABEL, OS_NAME,
-    // Squashfs
-    SQUASHFS_ISO_PATH, SQUASHFS_NAME,
+    // EROFS rootfs
+    ROOTFS_ISO_PATH, ROOTFS_NAME,
     // Boot files
     INITRAMFS_LIVE_ISO_PATH, INITRAMFS_LIVE_OUTPUT, KERNEL_ISO_PATH,
     // ISO structure
@@ -42,7 +42,7 @@ fn iso_label() -> String {
 /// Paths used during ISO creation.
 struct IsoPaths {
     output_dir: PathBuf,
-    squashfs: PathBuf,
+    rootfs: PathBuf,
     initramfs_live: PathBuf,
     iso_output: PathBuf,
     iso_root: PathBuf,
@@ -54,7 +54,7 @@ impl IsoPaths {
     fn new(base_dir: &Path) -> Self {
         let output_dir = base_dir.join("output");
         Self {
-            squashfs: output_dir.join(SQUASHFS_NAME),
+            rootfs: output_dir.join(ROOTFS_NAME),
             initramfs_live: output_dir.join(INITRAMFS_LIVE_OUTPUT),
             iso_output: output_dir.join(ISO_FILENAME),
             iso_root: output_dir.join("iso-root"),
@@ -65,20 +65,20 @@ impl IsoPaths {
     }
 }
 
-/// Create ISO using squashfs-based architecture.
+/// Create ISO using EROFS-based architecture.
 ///
 /// This creates an ISO with:
-/// - Tiny initramfs (~5MB) - mounts squashfs + overlay
-/// - Squashfs image (~200MB) - complete base system
+/// - Tiny initramfs (~5MB) - mounts EROFS + overlay
+/// - EROFS image (~200MB) - complete base system
 /// - Live overlay - live-specific configs (autologin, serial console)
 ///
 /// Boot flow:
 /// 1. kernel -> tiny initramfs
-/// 2. init_tiny mounts squashfs as lower layer
+/// 2. init_tiny mounts EROFS as lower layer
 /// 3. init_tiny mounts /live/overlay from ISO as middle layer
 /// 4. init_tiny mounts tmpfs as upper layer (for writes)
 /// 5. switch_root -> OpenRC
-pub fn create_squashfs_iso(base_dir: &Path) -> Result<()> {
+pub fn create_iso(base_dir: &Path) -> Result<()> {
     let paths = IsoPaths::new(base_dir);
 
     println!("=== Building AcornOS ISO ===\n");
@@ -106,13 +106,13 @@ pub fn create_squashfs_iso(base_dir: &Path) -> Result<()> {
     // Stage 7: Generate checksum for the temporary ISO (using shared infrastructure)
     let _checksum_path = generate_iso_checksum(&temp_iso)?;
 
-    // Atomic rename to final destination
-    fs::rename(&temp_iso, &paths.iso_output)?;
+    // Atomic move to final destination (with cross-filesystem fallback)
+    atomic_move(&temp_iso, &paths.iso_output)?;
 
     // Also move the checksum
     let temp_checksum = temp_iso.with_extension(ISO_CHECKSUM_SUFFIX.trim_start_matches('.'));
     let final_checksum = paths.iso_output.with_extension(ISO_CHECKSUM_SUFFIX.trim_start_matches('.'));
-    let _ = fs::rename(&temp_checksum, &final_checksum);
+    let _ = atomic_move(&temp_checksum, &final_checksum);
 
     print_iso_summary(&paths.iso_output);
     Ok(())
@@ -120,11 +120,11 @@ pub fn create_squashfs_iso(base_dir: &Path) -> Result<()> {
 
 /// Stage 1: Validate that required input files exist.
 fn validate_iso_inputs(paths: &IsoPaths) -> Result<()> {
-    if !paths.squashfs.exists() {
+    if !paths.rootfs.exists() {
         bail!(
-            "Squashfs not found at {}.\n\
-             Run 'acornos build squashfs' first.",
-            paths.squashfs.display()
+            "EROFS rootfs not found at {}.\n\
+             Run 'acornos build rootfs' first.",
+            paths.rootfs.display()
         );
     }
 
@@ -210,7 +210,7 @@ exec /bin/sh -l
 
     // Create empty root password (allow passwordless login)
     // This is applied ONLY during live boot via overlay
-    // The squashfs base system has a locked root password
+    // The EROFS base system has a locked root password
     let shadow_content = "root::0:0:99999:7:::\n\
                           bin:!:0:0:99999:7:::\n\
                           daemon:!:0:0:99999:7:::\n\
@@ -225,7 +225,7 @@ exec /bin/sh -l
 
     // Enable serial console for automated testing
     // Create /etc/inittab with serial getty ENABLED
-    // This overlays the base inittab from squashfs (which has serial commented out)
+    // This overlays the base inittab from EROFS (which has serial commented out)
     //
     // For autologin on serial, we use agetty --autologin which:
     // - Automatically logs in the specified user (root)
@@ -401,7 +401,7 @@ IdleAction=ignore
     Ok(())
 }
 
-/// Stage 4: Copy kernel, initramfs, squashfs, and live overlay to ISO.
+/// Stage 4: Copy kernel, initramfs, rootfs, and live overlay to ISO.
 fn copy_iso_artifacts(paths: &IsoPaths) -> Result<()> {
     // Copy custom-built kernel (from output/staging/boot/vmlinuz)
     println!("Copying kernel from {}...", paths.kernel.display());
@@ -411,9 +411,9 @@ fn copy_iso_artifacts(paths: &IsoPaths) -> Result<()> {
     println!("Copying initramfs...");
     fs::copy(&paths.initramfs_live, paths.iso_root.join(INITRAMFS_LIVE_ISO_PATH))?;
 
-    // Copy squashfs to /live/
-    println!("Copying squashfs to ISO...");
-    fs::copy(&paths.squashfs, paths.iso_root.join(SQUASHFS_ISO_PATH))?;
+    // Copy EROFS rootfs to /live/
+    println!("Copying EROFS rootfs to ISO...");
+    fs::copy(&paths.rootfs, paths.iso_root.join(ROOTFS_ISO_PATH))?;
 
     // Copy live overlay to /live/overlay/
     let live_overlay_src = paths.output_dir.join("live-overlay");
@@ -478,8 +478,8 @@ fn setup_uefi_boot(paths: &IsoPaths) -> Result<()> {
     // - root=LABEL=XXX: Passed to init script for finding boot device
     // Note: Alpine GRUB uses `linux`/`initrd`, not `linuxefi`/`initrdefi`
     let label = iso_label();
-    // Modules needed for live boot (match Alpine's approach)
-    let modules = "modules=loop,squashfs,overlay,virtio_pci,virtio_blk,virtio_scsi,sd-mod,sr-mod,cdrom,isofs";
+    // Modules needed for live boot (EROFS + overlay)
+    let modules = "modules=loop,erofs,overlay,virtio_pci,virtio_blk,virtio_scsi,sd-mod,sr-mod,cdrom,isofs";
     // IMPORTANT: console= order matters. The LAST console becomes /dev/console for init.
     // For serial testing, ttyS0 must be last so init's stdout goes to serial.
     let grub_cfg = format!(

@@ -27,7 +27,7 @@ const MODULE_METADATA_FILES: &[&str] = &[
 /// Copy kernel modules to the final staging directory.
 ///
 /// Modules are already installed to output/staging/lib/modules/ by the kernel build.
-/// This function copies them to the squashfs root and runs depmod.
+/// This function copies them to the EROFS staging root and runs depmod.
 pub fn copy_modules(ctx: &BuildContext) -> Result<()> {
     println!("Setting up kernel modules...");
 

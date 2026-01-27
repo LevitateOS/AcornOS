@@ -12,7 +12,7 @@ use std::path::Path;
 /// - Alpine Extended ISO: ~1 GB
 /// - Extracted ISO contents: ~1 GB
 /// - Rootfs: ~2 GB
-/// - Build artifacts (squashfs, initramfs, ISO): ~1 GB
+/// - Build artifacts (EROFS, initramfs, ISO): ~1 GB
 const MIN_DISK_SPACE_BYTES: u64 = 5 * 1024 * 1024 * 1024;
 
 /// Check that sufficient disk space is available (using shared infrastructure).

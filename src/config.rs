@@ -57,14 +57,6 @@ impl DistroConfig for AcornConfig {
     fn init_system(&self) -> InitSystem {
         InitSystem::OpenRC
     }
-
-    fn squashfs_compression(&self) -> &str {
-        distro_spec::acorn::SQUASHFS_COMPRESSION
-    }
-
-    fn squashfs_block_size(&self) -> &str {
-        distro_spec::acorn::SQUASHFS_BLOCK_SIZE
-    }
 }
 
 #[cfg(test)]

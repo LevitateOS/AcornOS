@@ -12,10 +12,10 @@
 //! # Download Alpine Extended ISO (~1GB)
 //! recipe resolve alpine
 //!
-//! # Build squashfs only
-//! acornos build squashfs
+//! # Build EROFS rootfs only
+//! acornos build rootfs
 //!
-//! # Build complete ISO (squashfs + initramfs + ISO)
+//! # Build complete ISO (rootfs + initramfs + ISO)
 //! acornos build
 //!
 //! # Rebuild only the initramfs
@@ -52,7 +52,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Build artifacts (squashfs, or full build)
+    /// Build artifacts (rootfs, or full build)
     Build {
         #[command(subcommand)]
         artifact: Option<BuildArtifact>,
@@ -61,7 +61,7 @@ enum Commands {
     /// Rebuild only the initramfs
     Initramfs,
 
-    /// Rebuild only the ISO (requires squashfs and initramfs)
+    /// Rebuild only the ISO (requires rootfs and initramfs)
     Iso,
 
     /// Run the ISO in QEMU (GUI)
@@ -86,8 +86,8 @@ enum BuildArtifact {
         #[arg(long)]
         clean: bool,
     },
-    /// Build only the squashfs from rootfs
-    Squashfs,
+    /// Build only the EROFS rootfs image
+    Rootfs,
 }
 
 fn main() {
@@ -96,7 +96,7 @@ fn main() {
     let result = match cli.command {
         Commands::Build { artifact } => match artifact {
             Some(BuildArtifact::Kernel { clean }) => cmd_build_kernel(clean),
-            Some(BuildArtifact::Squashfs) => cmd_build_squashfs(),
+            Some(BuildArtifact::Rootfs) => cmd_build_rootfs(),
             None => cmd_build(),
         },
         Commands::Initramfs => cmd_initramfs(),
@@ -116,7 +116,7 @@ fn cmd_build() -> Result<()> {
     use std::time::Instant;
     use acornos::Timer;
 
-    // Full build: kernel + squashfs + initramfs + ISO
+    // Full build: kernel + EROFS + initramfs + ISO
     // Skips anything already built, rebuilds only on changes.
     let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let workspace_root = base_dir.parent().expect("AcornOS must be in workspace");
@@ -153,15 +153,15 @@ fn cmd_build() -> Result<()> {
         println!("[SKIP] Kernel already built and installed");
     }
 
-    // 2. Build squashfs (skip if inputs unchanged)
-    if acornos::rebuild::squashfs_needs_rebuild(&base_dir) {
-        println!("\nBuilding squashfs system image...");
-        let t = Timer::start("Squashfs");
-        acornos::artifact::build_squashfs(&base_dir)?;
-        acornos::rebuild::cache_squashfs_hash(&base_dir);
+    // 2. Build EROFS rootfs (skip if inputs unchanged)
+    if acornos::rebuild::rootfs_needs_rebuild(&base_dir) {
+        println!("\nBuilding EROFS system image...");
+        let t = Timer::start("EROFS");
+        acornos::artifact::build_rootfs(&base_dir)?;
+        acornos::rebuild::cache_rootfs_hash(&base_dir);
         t.finish();
     } else {
-        println!("\n[SKIP] Squashfs already built (inputs unchanged)");
+        println!("\n[SKIP] EROFS rootfs already built (inputs unchanged)");
     }
 
     // 3. Build initramfs (skip if inputs unchanged)
@@ -179,7 +179,7 @@ fn cmd_build() -> Result<()> {
     if acornos::rebuild::iso_needs_rebuild(&base_dir) {
         println!("\nBuilding ISO...");
         let t = Timer::start("ISO");
-        acornos::artifact::create_squashfs_iso(&base_dir)?;
+        acornos::artifact::create_iso(&base_dir)?;
         t.finish();
     } else {
         println!("\n[SKIP] ISO already built (components unchanged)");
@@ -255,15 +255,15 @@ fn cmd_build_kernel(clean: bool) -> Result<()> {
     Ok(())
 }
 
-fn cmd_build_squashfs() -> Result<()> {
+fn cmd_build_rootfs() -> Result<()> {
     let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
 
-    if acornos::rebuild::squashfs_needs_rebuild(&base_dir) {
-        acornos::artifact::build_squashfs(&base_dir)?;
-        acornos::rebuild::cache_squashfs_hash(&base_dir);
+    if acornos::rebuild::rootfs_needs_rebuild(&base_dir) {
+        acornos::artifact::build_rootfs(&base_dir)?;
+        acornos::rebuild::cache_rootfs_hash(&base_dir);
     } else {
-        println!("[SKIP] Squashfs already built (inputs unchanged)");
-        println!("  Delete output/filesystem.squashfs to force rebuild");
+        println!("[SKIP] EROFS rootfs already built (inputs unchanged)");
+        println!("  Delete output/filesystem.erofs to force rebuild");
     }
     Ok(())
 }
@@ -285,13 +285,13 @@ fn cmd_iso() -> Result<()> {
     let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
 
     // Ensure dependencies exist first
-    let squashfs = base_dir.join("output/filesystem.squashfs");
+    let rootfs = base_dir.join("output/filesystem.erofs");
     let initramfs = base_dir.join("output/initramfs-live.cpio.gz");
 
-    if !squashfs.exists() {
-        println!("Squashfs not found, building...");
-        acornos::artifact::build_squashfs(&base_dir)?;
-        acornos::rebuild::cache_squashfs_hash(&base_dir);
+    if !rootfs.exists() {
+        println!("EROFS rootfs not found, building...");
+        acornos::artifact::build_rootfs(&base_dir)?;
+        acornos::rebuild::cache_rootfs_hash(&base_dir);
     }
     if !initramfs.exists() {
         println!("Initramfs not found, building...");
@@ -300,7 +300,7 @@ fn cmd_iso() -> Result<()> {
     }
 
     if acornos::rebuild::iso_needs_rebuild(&base_dir) {
-        acornos::artifact::create_squashfs_iso(&base_dir)?;
+        acornos::artifact::create_iso(&base_dir)?;
     } else {
         println!("[SKIP] ISO already built (components unchanged)");
         println!("  Delete output/acornos.iso to force rebuild");
@@ -386,7 +386,7 @@ fn cmd_status() -> Result<()> {
     let output_dir = base_dir.join("output");
     let kernel = output_dir.join("staging/boot/vmlinuz");
     let kernel_build = output_dir.join("kernel-build");
-    let squashfs = output_dir.join("filesystem.squashfs");
+    let rootfs = output_dir.join("filesystem.erofs");
     let initramfs = output_dir.join("initramfs-live.cpio.gz");
     let iso = output_dir.join("acornos.iso");
 
@@ -403,11 +403,11 @@ fn cmd_status() -> Result<()> {
     } else {
         println!("  Kernel:          NOT BUILT");
     }
-    if squashfs.exists() {
-        let size = std::fs::metadata(&squashfs).map(|m| m.len() / 1024 / 1024).unwrap_or(0);
-        println!("  Squashfs:        BUILT ({} MB)", size);
+    if rootfs.exists() {
+        let size = std::fs::metadata(&rootfs).map(|m| m.len() / 1024 / 1024).unwrap_or(0);
+        println!("  EROFS:           BUILT ({} MB)", size);
     } else {
-        println!("  Squashfs:        NOT BUILT");
+        println!("  EROFS:           NOT BUILT");
     }
     if initramfs.exists() {
         let size = std::fs::metadata(&initramfs).map(|m| m.len() / 1024).unwrap_or(0);
@@ -430,8 +430,8 @@ fn cmd_status() -> Result<()> {
         println!("  1. Run 'recipe install deps/alpine.rhai' to download and create rootfs");
     } else if !kernel.exists() {
         println!("  1. Run 'acornos build kernel' to build the kernel");
-    } else if !squashfs.exists() {
-        println!("  1. Run 'acornos build squashfs' to create filesystem.squashfs");
+    } else if !rootfs.exists() {
+        println!("  1. Run 'acornos build rootfs' to create filesystem.erofs");
     } else if !initramfs.exists() {
         println!("  1. Run 'acornos initramfs' to create initramfs");
     } else if !iso.exists() {

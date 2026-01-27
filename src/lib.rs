@@ -13,7 +13,7 @@
 //!     │
 //!     ├── config.rs      DistroConfig implementation
 //!     ├── extract.rs     Path definitions (download logic in deps/alpine.rhai)
-//!     ├── artifact/      Build artifacts (squashfs, initramfs, ISO)
+//!     ├── artifact/      Build artifacts (EROFS, initramfs, ISO)
 //!     ├── qemu.rs        QEMU runner
 //!     └── component/     OpenRC-specific components
 //!

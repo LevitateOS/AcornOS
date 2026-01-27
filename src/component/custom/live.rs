@@ -47,7 +47,7 @@ echo ""
 /// Create live overlay directory structure.
 ///
 /// The live ISO uses an overlay filesystem:
-/// - Lower layer: squashfs (read-only)
+/// - Lower layer: EROFS (read-only)
 /// - Upper layer: tmpfs (read-write)
 ///
 /// This creates the directories needed for the overlay.
@@ -55,7 +55,7 @@ pub fn create_live_overlay(ctx: &BuildContext) -> Result<()> {
     let staging = &ctx.staging;
 
     // The overlay directories are created at boot by initramfs,
-    // but we need to ensure the mount points exist in the squashfs.
+    // but we need to ensure the mount points exist in the EROFS image.
 
     // /run is used for runtime data
     fs::create_dir_all(staging.join("run"))?;
@@ -72,7 +72,7 @@ pub fn create_live_overlay(ctx: &BuildContext) -> Result<()> {
 /// Copy recstrap installer tools.
 ///
 /// recstrap is the AcornOS equivalent of pacstrap - it extracts
-/// the squashfs to a target disk for installation.
+/// the EROFS image to a target disk for installation.
 pub fn copy_recstrap(ctx: &BuildContext) -> Result<()> {
     let staging = &ctx.staging;
 
@@ -119,7 +119,10 @@ pub fn copy_recstrap(ctx: &BuildContext) -> Result<()> {
 #    mount /dev/sdX2 /mnt
 #    mkdir -p /mnt/boot/efi
 #    mount /dev/sdX1 /mnt/boot/efi
-#    unsquashfs -d /mnt /run/live/rootfs/filesystem.squashfs
+#    # Mount the EROFS image and copy files
+#    mkdir -p /tmp/erofs
+#    mount -t erofs /media/cdrom/live/filesystem.erofs /tmp/erofs
+#    cp -a /tmp/erofs/* /mnt/
 #
 # 4. Install bootloader:
 #    arch-chroot /mnt

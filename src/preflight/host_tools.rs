@@ -9,7 +9,7 @@ use distro_builder::process::{exists, which};
 const REQUIRED_TOOLS: &[(&str, &str, &str)] = &[
     ("7z", "Extract ISO contents", "sudo dnf install p7zip-plugins"),
     ("tar", "Extract APK packages", "sudo dnf install tar"),
-    ("mksquashfs", "Build squashfs image", "sudo dnf install squashfs-tools"),
+    ("mkfs.erofs", "Build EROFS image", "sudo dnf install erofs-utils"),
     ("xorriso", "Build bootable ISO", "sudo dnf install xorriso"),
     ("curl", "Download files", "sudo dnf install curl"),
     ("cpio", "Build initramfs", "sudo dnf install cpio"),
