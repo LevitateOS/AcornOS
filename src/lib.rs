@@ -42,6 +42,7 @@ pub mod extract;
 pub mod preflight;
 pub mod qemu;
 pub mod rebuild;
+pub mod recipe;
 pub mod timing;
 
 pub use config::AcornConfig;

@@ -52,6 +52,12 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Download Alpine dependencies (ISO and packages)
+    Download {
+        #[command(subcommand)]
+        what: Option<DownloadTarget>,
+    },
+
     /// Build artifacts (rootfs, or full build)
     Build {
         #[command(subcommand)]
@@ -82,6 +88,18 @@ enum Commands {
 }
 
 #[derive(Subcommand)]
+enum DownloadTarget {
+    /// Download Alpine Extended ISO and apk-tools
+    Alpine,
+    /// Download Linux kernel source
+    Linux,
+    /// Download installation tools (recstrap, recfstab, recchroot)
+    Tools,
+    /// Download everything
+    All,
+}
+
+#[derive(Subcommand)]
 enum BuildArtifact {
     /// Build the kernel from source
     Kernel {
@@ -97,6 +115,12 @@ fn main() {
     let cli = Cli::parse();
 
     let result = match cli.command {
+        Commands::Download { what } => match what {
+            Some(DownloadTarget::Alpine) => cmd_download_alpine(),
+            Some(DownloadTarget::Linux) => cmd_download_linux(),
+            Some(DownloadTarget::Tools) => cmd_download_tools(),
+            Some(DownloadTarget::All) | None => cmd_download_all(),
+        },
         Commands::Build { artifact } => match artifact {
             Some(BuildArtifact::Kernel { clean }) => cmd_build_kernel(clean),
             Some(BuildArtifact::Rootfs) => cmd_build_rootfs(),
@@ -357,6 +381,81 @@ fn cmd_preflight() -> Result<()> {
     Ok(())
 }
 
+fn cmd_download_all() -> Result<()> {
+    let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+
+    println!("Resolving all dependencies...\n");
+
+    // Alpine ISO and packages
+    let alpine = acornos::recipe::alpine(&base_dir)?;
+    println!("Alpine:  {} [OK]", alpine.iso.display());
+
+    // Linux kernel
+    let linux = acornos::recipe::linux(&base_dir)?;
+    println!("Linux:   {} [OK]", linux.source.display());
+
+    // Installation tools
+    acornos::recipe::install_tools(&base_dir)?;
+
+    println!("\nAll dependencies resolved.");
+    Ok(())
+}
+
+fn cmd_download_alpine() -> Result<()> {
+    let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let alpine = acornos::recipe::alpine(&base_dir)?;
+
+    println!("Alpine ISO and packages:");
+    println!("  ISO:         {}", alpine.iso.display());
+    println!("  rootfs:      {}", alpine.rootfs.display());
+
+    Ok(())
+}
+
+fn cmd_download_linux() -> Result<()> {
+    let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let linux = acornos::recipe::linux(&base_dir)?;
+
+    println!("Linux kernel:");
+    println!("  Source:      {}", linux.source.display());
+    if linux.is_installed() {
+        println!(
+            "  Installed:   {} (kernel {})",
+            linux.vmlinuz.display(),
+            linux.version
+        );
+    } else {
+        println!("  Kernel:      NOT INSTALLED YET");
+    }
+
+    Ok(())
+}
+
+fn cmd_download_tools() -> Result<()> {
+    use distro_spec::shared::LEVITATE_CARGO_TOOLS;
+
+    let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+
+    println!("Installing tools via recipes...\n");
+    acornos::recipe::install_tools(&base_dir)?;
+
+    // Show what was installed
+    let staging_bin = base_dir.join("output/staging/usr/bin");
+    println!("\nTools installed:");
+    for tool in LEVITATE_CARGO_TOOLS {
+        let path = staging_bin.join(tool);
+        let status = if path.exists() { "OK" } else { "MISSING" };
+        println!(
+            "  {:10} {} [{}]",
+            format!("{}:", tool),
+            path.display(),
+            status
+        );
+    }
+
+    Ok(())
+}
+
 fn cmd_status() -> Result<()> {
     use acornos::config::AcornConfig;
     use acornos::extract::ExtractPaths;
@@ -381,20 +480,20 @@ fn cmd_status() -> Result<()> {
     if paths.iso.exists() {
         println!("  Alpine ISO:      FOUND at {}", paths.iso.display());
     } else {
-        println!("  Alpine ISO:      NOT FOUND (run 'recipe resolve deps/alpine.rhai')");
+        println!("  Alpine ISO:      NOT FOUND (run 'acornos download alpine')");
     }
 
     let apk_static = paths.apk_tools.join("sbin").join("apk.static");
     if apk_static.exists() {
         println!("  apk-tools:       FOUND at {}", apk_static.display());
     } else {
-        println!("  apk-tools:       NOT FOUND (run 'recipe resolve deps/alpine.rhai')");
+        println!("  apk-tools:       NOT FOUND (run 'acornos download alpine')");
     }
 
     if paths.rootfs.exists() && paths.rootfs.join("bin").exists() {
         println!("  Rootfs:          CREATED at {}", paths.rootfs.display());
     } else {
-        println!("  Rootfs:          NOT CREATED (run 'recipe resolve deps/alpine.rhai')");
+        println!("  Rootfs:          NOT CREATED (run 'acornos download alpine')");
     }
     println!();
 
@@ -474,7 +573,7 @@ fn cmd_status() -> Result<()> {
     if !linux_source.exists() {
         println!("  1. Run 'git submodule update --init linux' to get kernel source");
     } else if !paths.rootfs.exists() {
-        println!("  1. Run 'recipe install deps/alpine.rhai' to download and create rootfs");
+        println!("  1. Run 'acornos download alpine' to download and create rootfs");
     } else if !kernel.exists() {
         println!("  1. Run 'acornos build kernel' to build the kernel");
     } else if !rootfs.exists() {
