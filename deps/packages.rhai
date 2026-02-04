@@ -153,7 +153,14 @@ fn build(ctx) {
 
     log("Installing supplementary packages...");
 
-    let apk_cmd = apk_static + " --root " + rootfs + " --usermode --no-progress --allow-untrusted add ";
+    // Initialize APK database if missing
+    let apk_db_dir = join_path(rootfs, "var/lib/apk");
+    if !is_dir(apk_db_dir) {
+        mkdir(apk_db_dir);
+        log("Initialized APK database directory");
+    }
+
+    let apk_cmd = apk_static + " --root " + rootfs + " --no-progress --allow-untrusted add ";
 
     // === Tier 1: Core System ===
     log("Installing Tier 1: Core system...");
