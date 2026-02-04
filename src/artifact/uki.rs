@@ -12,7 +12,8 @@ use anyhow::Result;
 use std::path::{Path, PathBuf};
 
 use distro_spec::acorn::{
-    OS_ID, OS_NAME, OS_VERSION, SERIAL_CONSOLE, UKI_ENTRIES, UKI_INSTALLED_ENTRIES, VGA_CONSOLE,
+    ISO_LABEL, OS_ID, OS_NAME, OS_VERSION, SERIAL_CONSOLE, UKI_ENTRIES, UKI_INSTALLED_ENTRIES,
+    VGA_CONSOLE,
 };
 use recuki::UkiConfig;
 
@@ -58,9 +59,11 @@ pub fn build_live_ukis(kernel: &Path, initramfs: &Path, output_dir: &Path) -> Re
     println!("Building UKIs for live ISO boot...");
 
     // Base cmdline for live boot
-    // Uses root=LABEL=ACORNOS to find the ISO
     // VGA first, serial last so /dev/console -> serial for testing
-    let base_cmdline = format!("root=LABEL=ACORNOS {} {}", VGA_CONSOLE, SERIAL_CONSOLE);
+    let base_cmdline = format!(
+        "root=LABEL={} {} {}",
+        ISO_LABEL, VGA_CONSOLE, SERIAL_CONSOLE
+    );
 
     let mut outputs = Vec::new();
 
@@ -136,9 +139,12 @@ mod tests {
 
     #[test]
     fn test_base_cmdline_format() {
-        let cmdline = format!("root=LABEL=ACORNOS {} {}", VGA_CONSOLE, SERIAL_CONSOLE);
+        let cmdline = format!(
+            "root=LABEL={} {} {}",
+            ISO_LABEL, VGA_CONSOLE, SERIAL_CONSOLE
+        );
 
-        assert!(cmdline.contains("root=LABEL=ACORNOS"));
+        assert!(cmdline.contains(&format!("root=LABEL={}", ISO_LABEL)));
         assert!(cmdline.contains("console=ttyS0"));
         assert!(cmdline.contains("console=tty0"));
     }
