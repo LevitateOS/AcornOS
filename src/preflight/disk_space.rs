@@ -85,7 +85,6 @@ pub fn available_space(path: &Path) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::env;
 
     #[test]
     fn test_check_disk_space_current_dir() {
