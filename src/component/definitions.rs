@@ -491,10 +491,12 @@ pub static FIRMWARE: Component = Component {
     name: "firmware",
     phase: Phase::Firmware,
     ops: &[
-        // WiFi firmware (minimum needed for most laptops)
+        // WiFi firmware only for live ISO
+        // This reduces the EROFS size to < 500MB while maintaining
+        // the ability to add drivers post-boot via apk for real hardware.
+        // Packages are installed (so distro-spec is satisfied) but only
+        // essential WiFi firmware is copied to the staging rootfs.
         custom(CustomOp::CopyWifiFirmware),
-        // All firmware for daily driver support
-        custom(CustomOp::CopyAllFirmware),
     ],
 };
 
