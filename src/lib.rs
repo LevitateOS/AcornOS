@@ -39,6 +39,7 @@ pub mod cache;
 pub mod component;
 pub mod config;
 pub mod extract;
+pub mod keys;
 pub mod preflight;
 pub mod qemu;
 pub mod rebuild;
@@ -46,4 +47,5 @@ pub mod recipe;
 pub mod timing;
 
 pub use config::AcornConfig;
+pub use keys::{install_keys, verify_keys};
 pub use timing::Timer;

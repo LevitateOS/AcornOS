@@ -1,6 +1,7 @@
 //! Alpine Linux dependency via recipe.
 
 use super::{find_recipe, run_recipe_json};
+use crate::keys;
 use anyhow::{bail, Result};
 use distro_builder::process::ensure_exists;
 use std::path::{Path, PathBuf};
@@ -80,6 +81,10 @@ pub fn alpine(base_dir: &Path) -> Result<AlpinePaths> {
             },
         );
     }
+
+    // Install Alpine signing keys into the rootfs for package verification
+    eprintln!("Installing Alpine signing keys...");
+    keys::install_keys(&paths.rootfs)?;
 
     Ok(paths)
 }
