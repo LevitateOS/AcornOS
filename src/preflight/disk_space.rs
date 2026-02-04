@@ -40,7 +40,10 @@ pub fn check_disk_space(base_dir: &Path) -> CheckResult {
             if available >= MIN_DISK_SPACE_BYTES {
                 CheckResult::pass(
                     "Disk space",
-                    format!("{:.1} GB available (need {:.1} GB)", available_gb, required_gb),
+                    format!(
+                        "{:.1} GB available (need {:.1} GB)",
+                        available_gb, required_gb
+                    ),
                 )
             } else {
                 CheckResult::fail(

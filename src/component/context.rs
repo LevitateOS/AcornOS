@@ -130,11 +130,8 @@ mod tests {
     #[test]
     fn test_lib_path() {
         let dir = tempdir().unwrap();
-        let ctx = BuildContext::for_testing(
-            dir.path(),
-            dir.path().join("staging").as_path(),
-            dir.path(),
-        );
+        let ctx =
+            BuildContext::for_testing(dir.path(), dir.path().join("staging").as_path(), dir.path());
         assert_eq!(ctx.lib_path(), "usr/lib");
     }
 

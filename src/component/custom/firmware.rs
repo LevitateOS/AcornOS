@@ -94,7 +94,10 @@ pub fn copy_all_firmware(ctx: &BuildContext) -> Result<()> {
     let fw_dst = ctx.staging.join("lib/firmware");
 
     if !fw_src.exists() {
-        println!("  Warning: firmware source not found at {}", fw_src.display());
+        println!(
+            "  Warning: firmware source not found at {}",
+            fw_src.display()
+        );
         return Ok(());
     }
 

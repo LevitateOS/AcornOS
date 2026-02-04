@@ -129,7 +129,10 @@ fn copy_dir_recursive(src: &Path, dst: &Path, count: &mut usize) -> Result<()> {
         } else {
             fs::copy(&path, &dest_path)?;
             // Count .ko files (with any compression extension)
-            let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+            let name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
             if name.contains(".ko") {
                 *count += 1;
             }

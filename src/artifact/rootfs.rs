@@ -108,7 +108,10 @@ pub fn build_rootfs(base_dir: &Path) -> Result<()> {
     // Build EROFS from staging
     println!("\nCreating EROFS from staging...");
     println!("  Source: {}", staging.display());
-    println!("  Compression: {} (level {})", EROFS_COMPRESSION, EROFS_COMPRESSION_LEVEL);
+    println!(
+        "  Compression: {} (level {})",
+        EROFS_COMPRESSION, EROFS_COMPRESSION_LEVEL
+    );
 
     let result = create_erofs_internal(&staging, &work_output);
 

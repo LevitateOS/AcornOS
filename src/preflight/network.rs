@@ -16,11 +16,13 @@ pub async fn check_network() -> CheckResult {
     // This avoids adding reqwest as a dependency
     let result = tokio::process::Command::new("curl")
         .args([
-            "--head",           // HEAD request only
-            "--silent",         // No progress output
-            "--fail",           // Fail on HTTP errors
-            "--max-time", "10", // 10 second timeout
-            "--output", "/dev/null",
+            "--head",   // HEAD request only
+            "--silent", // No progress output
+            "--fail",   // Fail on HTTP errors
+            "--max-time",
+            "10", // 10 second timeout
+            "--output",
+            "/dev/null",
             ALPINE_EXTENDED_ISO_URL,
         ])
         .output()

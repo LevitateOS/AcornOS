@@ -20,11 +20,7 @@ pub fn create_fhs_symlinks(ctx: &BuildContext) -> Result<()> {
     let staging = &ctx.staging;
 
     // Merged /usr symlinks
-    let symlinks = [
-        ("bin", "usr/bin"),
-        ("sbin", "usr/sbin"),
-        ("lib", "usr/lib"),
-    ];
+    let symlinks = [("bin", "usr/bin"), ("sbin", "usr/sbin"), ("lib", "usr/lib")];
 
     for (link, target) in symlinks {
         let link_path = staging.join(link);
@@ -34,10 +30,7 @@ pub fn create_fhs_symlinks(ctx: &BuildContext) -> Result<()> {
     }
 
     // /var symlinks
-    let var_symlinks = [
-        ("var/run", "/run"),
-        ("var/lock", "/run/lock"),
-    ];
+    let var_symlinks = [("var/run", "/run"), ("var/lock", "/run/lock")];
 
     for (link, target) in var_symlinks {
         let link_path = staging.join(link);

@@ -134,7 +134,11 @@ impl PreflightReport {
 
         println!();
         if self.is_ok() {
-            println!("All preflight checks passed ({}/{})", self.passed_count(), self.total_count());
+            println!(
+                "All preflight checks passed ({}/{})",
+                self.passed_count(),
+                self.total_count()
+            );
         } else {
             println!(
                 "Preflight checks failed: {} of {} passed",

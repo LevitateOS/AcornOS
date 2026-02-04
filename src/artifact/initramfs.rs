@@ -72,12 +72,9 @@ fn verify_sha256(file: &Path, expected: &str) -> Result<()> {
 // Busybox Constants (canonical source: deps/alpine.rhai)
 // =============================================================================
 
-const BUSYBOX_URL: &str =
-    "https://busybox.net/downloads/binaries/1.35.0-x86_64-linux-musl/busybox";
-const BUSYBOX_SHA256: &str =
-    "6e123e7f3202a8c1e9b1f94d8941580a25135382b99e8d3e34fb858bba311348";
+const BUSYBOX_URL: &str = "https://busybox.net/downloads/binaries/1.35.0-x86_64-linux-musl/busybox";
+const BUSYBOX_SHA256: &str = "6e123e7f3202a8c1e9b1f94d8941580a25135382b99e8d3e34fb858bba311348";
 const BUSYBOX_URL_ENV: &str = "BUSYBOX_URL";
-
 
 /// Get busybox download URL from environment or use default.
 fn busybox_url() -> String {
@@ -86,9 +83,34 @@ fn busybox_url() -> String {
 
 /// Commands to symlink from busybox.
 const BUSYBOX_COMMANDS: &[&str] = &[
-    "sh", "mount", "umount", "mkdir", "cat", "ls", "sleep", "switch_root", "echo", "test", "[",
-    "grep", "sed", "ln", "rm", "cp", "mv", "chmod", "chown", "mknod", "losetup", "mount.loop",
-    "insmod", "modprobe", "xz", "gunzip", "find", "head",
+    "sh",
+    "mount",
+    "umount",
+    "mkdir",
+    "cat",
+    "ls",
+    "sleep",
+    "switch_root",
+    "echo",
+    "test",
+    "[",
+    "grep",
+    "sed",
+    "ln",
+    "rm",
+    "cp",
+    "mv",
+    "chmod",
+    "chown",
+    "mknod",
+    "losetup",
+    "mount.loop",
+    "insmod",
+    "modprobe",
+    "xz",
+    "gunzip",
+    "find",
+    "head",
 ];
 
 /// Build the tiny initramfs.
@@ -292,11 +314,19 @@ fn copy_boot_modules(base_dir: &Path, initramfs_root: &Path) -> Result<()> {
         println!("  Copied {} boot modules", copied);
     }
     if builtin > 0 {
-        println!("  {} boot modules are built-in to kernel (no .ko files)", builtin);
+        println!(
+            "  {} boot modules are built-in to kernel (no .ko files)",
+            builtin
+        );
     }
 
     // Copy modules.dep and other metadata files for depmod
-    for meta_file in ["modules.dep", "modules.dep.bin", "modules.alias", "modules.alias.bin"] {
+    for meta_file in [
+        "modules.dep",
+        "modules.dep.bin",
+        "modules.alias",
+        "modules.alias.bin",
+    ] {
         let src = kmod_src.join(meta_file);
         if src.exists() {
             fs::copy(&src, kmod_dst.join(meta_file))?;
@@ -326,15 +356,23 @@ fn create_init_script(base_dir: &Path, initramfs_root: &Path) -> Result<()> {
 /// Generate init script from template with distro-spec values.
 fn generate_init_script(base_dir: &Path) -> Result<String> {
     let template_path = base_dir.join("profile/init_tiny.template");
-    let template = fs::read_to_string(&template_path)
-        .with_context(|| format!("Failed to read init_tiny.template at {}", template_path.display()))?;
+    let template = fs::read_to_string(&template_path).with_context(|| {
+        format!(
+            "Failed to read init_tiny.template at {}",
+            template_path.display()
+        )
+    })?;
 
     // Extract module names from full paths
     // e.g., "kernel/fs/erofs/erofs.ko.gz" -> "erofs"
     let module_names: Vec<&str> = BOOT_MODULES
         .iter()
         .filter_map(|m| m.rsplit('/').next())
-        .map(|m| m.trim_end_matches(".ko.xz").trim_end_matches(".ko.gz").trim_end_matches(".ko"))
+        .map(|m| {
+            m.trim_end_matches(".ko.xz")
+                .trim_end_matches(".ko.gz")
+                .trim_end_matches(".ko")
+        })
         .collect();
 
     Ok(template

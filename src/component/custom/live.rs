@@ -78,7 +78,8 @@ pub fn copy_recstrap(ctx: &BuildContext) -> Result<()> {
 
     // Check if we have a pre-built recstrap binary
     let recstrap_candidates = [
-        ctx.base_dir.join("../tools/recstrap/target/release/recstrap"),
+        ctx.base_dir
+            .join("../tools/recstrap/target/release/recstrap"),
         ctx.base_dir.join("../target/release/recstrap"),
     ];
 
@@ -148,7 +149,8 @@ exit 1
     // Also copy recfstab and recchroot if available
     for tool in &["recfstab", "recchroot"] {
         let candidates = [
-            ctx.base_dir.join(format!("../tools/{}/target/release/{}", tool, tool)),
+            ctx.base_dir
+                .join(format!("../tools/{}/target/release/{}", tool, tool)),
             ctx.base_dir.join(format!("../target/release/{}", tool)),
         ];
 

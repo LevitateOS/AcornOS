@@ -18,20 +18,29 @@ use distro_builder::artifact::iso_utils::{
 };
 use distro_builder::process::Cmd;
 use distro_spec::acorn::{
-    // Identity
-    ISO_FILENAME, ISO_LABEL, OS_NAME,
-    // EROFS rootfs
-    ROOTFS_ISO_PATH, ROOTFS_NAME,
-    // Boot files
-    INITRAMFS_LIVE_ISO_PATH, INITRAMFS_LIVE_OUTPUT, KERNEL_ISO_PATH,
-    // ISO structure
-    ISO_EFI_DIR, LIVE_OVERLAY_ISO_PATH,
     // EFI
-    EFIBOOT_FILENAME, EFIBOOT_SIZE_MB, EFI_BOOTLOADER,
-    // Console
-    SERIAL_CONSOLE, VGA_CONSOLE,
+    EFIBOOT_FILENAME,
+    EFIBOOT_SIZE_MB,
+    EFI_BOOTLOADER,
+    // Boot files
+    INITRAMFS_LIVE_ISO_PATH,
+    INITRAMFS_LIVE_OUTPUT,
     // Checksum
     ISO_CHECKSUM_SUFFIX,
+    // ISO structure
+    ISO_EFI_DIR,
+    // Identity
+    ISO_FILENAME,
+    ISO_LABEL,
+    KERNEL_ISO_PATH,
+    LIVE_OVERLAY_ISO_PATH,
+    OS_NAME,
+    // EROFS rootfs
+    ROOTFS_ISO_PATH,
+    ROOTFS_NAME,
+    // Console
+    SERIAL_CONSOLE,
+    VGA_CONSOLE,
 };
 
 /// Get ISO volume label from environment or use default.
@@ -111,7 +120,9 @@ pub fn create_iso(base_dir: &Path) -> Result<()> {
 
     // Also move the checksum
     let temp_checksum = temp_iso.with_extension(ISO_CHECKSUM_SUFFIX.trim_start_matches('.'));
-    let final_checksum = paths.iso_output.with_extension(ISO_CHECKSUM_SUFFIX.trim_start_matches('.'));
+    let final_checksum = paths
+        .iso_output
+        .with_extension(ISO_CHECKSUM_SUFFIX.trim_start_matches('.'));
     let _ = atomic_move(&temp_checksum, &final_checksum);
 
     print_iso_summary(&paths.iso_output);
@@ -169,8 +180,13 @@ fn create_live_overlay(output_dir: &Path) -> Result<()> {
     let profile_overlay = base_dir.join("profile/live-overlay");
     if profile_overlay.exists() {
         println!("  Copying profile/live-overlay (test instrumentation)...");
-        copy_dir_recursive(&profile_overlay, &live_overlay)
-            .with_context(|| format!("Failed to copy {} -> {}", profile_overlay.display(), live_overlay.display()))?;
+        copy_dir_recursive(&profile_overlay, &live_overlay).with_context(|| {
+            format!(
+                "Failed to copy {} -> {}",
+                profile_overlay.display(),
+                live_overlay.display()
+            )
+        })?;
     }
 
     // =========================================================================
@@ -178,8 +194,7 @@ fn create_live_overlay(output_dir: &Path) -> Result<()> {
     // =========================================================================
 
     // Create directory structure
-    fs::create_dir_all(live_overlay.join("etc"))
-        .with_context(|| "Failed to create etc")?;
+    fs::create_dir_all(live_overlay.join("etc")).with_context(|| "Failed to create etc")?;
 
     // Create autologin script for serial console
     // This script is called by agetty -l to act as a login program replacement
@@ -378,7 +393,10 @@ kernel.sysrq = 1
 # - Or simply not having any suspend triggers
 "#;
     fs::create_dir_all(live_overlay.join("etc/sysctl.d"))?;
-    fs::write(live_overlay.join("etc/sysctl.d/50-live-no-suspend.conf"), sysctl_content)?;
+    fs::write(
+        live_overlay.join("etc/sysctl.d/50-live-no-suspend.conf"),
+        sysctl_content,
+    )?;
 
     // Method 3: If elogind is present, configure it
     fs::create_dir_all(live_overlay.join("etc/elogind/logind.conf.d"))?;
@@ -409,7 +427,10 @@ fn copy_iso_artifacts(paths: &IsoPaths) -> Result<()> {
 
     // Copy live initramfs
     println!("Copying initramfs...");
-    fs::copy(&paths.initramfs_live, paths.iso_root.join(INITRAMFS_LIVE_ISO_PATH))?;
+    fs::copy(
+        &paths.initramfs_live,
+        paths.iso_root.join(INITRAMFS_LIVE_ISO_PATH),
+    )?;
 
     // Copy EROFS rootfs to /live/
     println!("Copying EROFS rootfs to ISO...");
@@ -439,7 +460,11 @@ fn setup_uefi_boot(paths: &IsoPaths) -> Result<()> {
     let efi_bootloader_path = paths.iso_root.join(ISO_EFI_DIR).join(EFI_BOOTLOADER);
 
     // Try to copy EFI bootloader from Alpine ISO contents first
-    let iso_contents = paths.output_dir.parent().unwrap().join("downloads/iso-contents");
+    let iso_contents = paths
+        .output_dir
+        .parent()
+        .unwrap()
+        .join("downloads/iso-contents");
     let alpine_efi = iso_contents.join("efi/boot/bootx64.efi");
 
     if alpine_efi.exists() {
@@ -467,7 +492,10 @@ fn setup_uefi_boot(paths: &IsoPaths) -> Result<()> {
             .arg_path(&efi_bootloader_path)
             .args(["--locales="])
             .args(["--fonts="])
-            .arg(format!("boot/grub/grub.cfg={}", embedded_cfg_path.display()))
+            .arg(format!(
+                "boot/grub/grub.cfg={}",
+                embedded_cfg_path.display()
+            ))
             .error_msg("grub-mkstandalone failed. Install: sudo dnf install grub2-tools-extra")
             .run()?;
     }
@@ -479,7 +507,8 @@ fn setup_uefi_boot(paths: &IsoPaths) -> Result<()> {
     // Note: Alpine GRUB uses `linux`/`initrd`, not `linuxefi`/`initrdefi`
     let label = iso_label();
     // Modules needed for live boot (EROFS + overlay)
-    let modules = "modules=loop,erofs,overlay,virtio_pci,virtio_blk,virtio_scsi,sd-mod,sr-mod,cdrom,isofs";
+    let modules =
+        "modules=loop,erofs,overlay,virtio_pci,virtio_blk,virtio_scsi,sd-mod,sr-mod,cdrom,isofs";
     // IMPORTANT: console= order matters. The LAST console becomes /dev/console for init.
     // For serial testing, ttyS0 must be last so init's stdout goes to serial.
     let grub_cfg = format!(
@@ -507,9 +536,27 @@ menuentry '{} (Debug)' {{
 }}
 "#,
         // VGA first, serial LAST - so /dev/console -> serial for testing
-        OS_NAME, KERNEL_ISO_PATH, modules, label, VGA_CONSOLE, SERIAL_CONSOLE, INITRAMFS_LIVE_ISO_PATH,
-        OS_NAME, KERNEL_ISO_PATH, modules, label, VGA_CONSOLE, SERIAL_CONSOLE, INITRAMFS_LIVE_ISO_PATH,
-        OS_NAME, KERNEL_ISO_PATH, modules, label, VGA_CONSOLE, SERIAL_CONSOLE, INITRAMFS_LIVE_ISO_PATH,
+        OS_NAME,
+        KERNEL_ISO_PATH,
+        modules,
+        label,
+        VGA_CONSOLE,
+        SERIAL_CONSOLE,
+        INITRAMFS_LIVE_ISO_PATH,
+        OS_NAME,
+        KERNEL_ISO_PATH,
+        modules,
+        label,
+        VGA_CONSOLE,
+        SERIAL_CONSOLE,
+        INITRAMFS_LIVE_ISO_PATH,
+        OS_NAME,
+        KERNEL_ISO_PATH,
+        modules,
+        label,
+        VGA_CONSOLE,
+        SERIAL_CONSOLE,
+        INITRAMFS_LIVE_ISO_PATH,
     );
 
     // Write to both locations for compatibility:

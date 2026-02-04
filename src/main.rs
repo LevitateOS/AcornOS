@@ -113,8 +113,8 @@ fn main() {
 }
 
 fn cmd_build() -> Result<()> {
-    use std::time::Instant;
     use acornos::Timer;
+    use std::time::Instant;
 
     // Full build: kernel + EROFS + initramfs + ISO
     // Skips anything already built, rebuilds only on changes.
@@ -141,13 +141,21 @@ fn cmd_build() -> Result<()> {
         println!("Building kernel...");
         let t = Timer::start("Kernel");
         acornos::build::kernel::build_kernel(&linux_source, &output_dir, &base_dir)?;
-        acornos::build::kernel::install_kernel(&linux_source, &output_dir, &output_dir.join("staging"))?;
+        acornos::build::kernel::install_kernel(
+            &linux_source,
+            &output_dir,
+            &output_dir.join("staging"),
+        )?;
         acornos::rebuild::cache_kernel_hash(&base_dir);
         t.finish();
     } else if needs_install {
         println!("Installing kernel (compile skipped)...");
         let t = Timer::start("Kernel install");
-        acornos::build::kernel::install_kernel(&linux_source, &output_dir, &output_dir.join("staging"))?;
+        acornos::build::kernel::install_kernel(
+            &linux_source,
+            &output_dir,
+            &output_dir.join("staging"),
+        )?;
         t.finish();
     } else {
         println!("[SKIP] Kernel already built and installed");
@@ -229,7 +237,11 @@ fn cmd_build_kernel(clean: bool) -> Result<()> {
         println!("Building kernel...");
         let t = Timer::start("Kernel");
         let version = acornos::build::kernel::build_kernel(&linux_source, &output_dir, &base_dir)?;
-        acornos::build::kernel::install_kernel(&linux_source, &output_dir, &output_dir.join("staging"))?;
+        acornos::build::kernel::install_kernel(
+            &linux_source,
+            &output_dir,
+            &output_dir.join("staging"),
+        )?;
         acornos::rebuild::cache_kernel_hash(&base_dir);
         t.finish();
 
@@ -240,7 +252,11 @@ fn cmd_build_kernel(clean: bool) -> Result<()> {
     } else if needs_install {
         println!("Installing kernel (compile skipped)...");
         let t = Timer::start("Kernel install");
-        let version = acornos::build::kernel::install_kernel(&linux_source, &output_dir, &output_dir.join("staging"))?;
+        let version = acornos::build::kernel::install_kernel(
+            &linux_source,
+            &output_dir,
+            &output_dir.join("staging"),
+        )?;
         t.finish();
 
         println!("\n=== Kernel install complete ===");
@@ -392,7 +408,9 @@ fn cmd_status() -> Result<()> {
 
     println!("Build Artifacts:");
     if kernel.exists() {
-        let size = std::fs::metadata(&kernel).map(|m| m.len() / 1024 / 1024).unwrap_or(0);
+        let size = std::fs::metadata(&kernel)
+            .map(|m| m.len() / 1024 / 1024)
+            .unwrap_or(0);
         // Check if kernel-build is a symlink (stolen from leviso)
         let stolen = kernel_build.is_symlink();
         if stolen {
@@ -404,19 +422,25 @@ fn cmd_status() -> Result<()> {
         println!("  Kernel:          NOT BUILT");
     }
     if rootfs.exists() {
-        let size = std::fs::metadata(&rootfs).map(|m| m.len() / 1024 / 1024).unwrap_or(0);
+        let size = std::fs::metadata(&rootfs)
+            .map(|m| m.len() / 1024 / 1024)
+            .unwrap_or(0);
         println!("  EROFS:           BUILT ({} MB)", size);
     } else {
         println!("  EROFS:           NOT BUILT");
     }
     if initramfs.exists() {
-        let size = std::fs::metadata(&initramfs).map(|m| m.len() / 1024).unwrap_or(0);
+        let size = std::fs::metadata(&initramfs)
+            .map(|m| m.len() / 1024)
+            .unwrap_or(0);
         println!("  Initramfs:       BUILT ({} KB)", size);
     } else {
         println!("  Initramfs:       NOT BUILT");
     }
     if iso.exists() {
-        let size = std::fs::metadata(&iso).map(|m| m.len() / 1024 / 1024).unwrap_or(0);
+        let size = std::fs::metadata(&iso)
+            .map(|m| m.len() / 1024 / 1024)
+            .unwrap_or(0);
         println!("  ISO:             BUILT ({} MB)", size);
     } else {
         println!("  ISO:             NOT BUILT");

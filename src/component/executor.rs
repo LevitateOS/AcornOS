@@ -19,7 +19,8 @@ pub fn execute(ctx: &BuildContext, component: &Component) -> Result<()> {
     println!("Installing {}...", component.name);
 
     for op in component.ops {
-        execute_op(ctx, op).with_context(|| format!("in component '{}': {:?}", component.name, op))?;
+        execute_op(ctx, op)
+            .with_context(|| format!("in component '{}': {:?}", component.name, op))?;
     }
 
     Ok(())
@@ -225,7 +226,8 @@ fn copy_binary(ctx: &BuildContext, name: &str, dest_dir: &str) -> Result<()> {
     }
 
     // Copy the binary
-    fs::copy(&src, &dst).with_context(|| format!("copying {} to {}", src.display(), dst.display()))?;
+    fs::copy(&src, &dst)
+        .with_context(|| format!("copying {} to {}", src.display(), dst.display()))?;
     make_executable(&dst)?;
 
     // Copy library dependencies (musl-based)
@@ -399,7 +401,10 @@ fn ensure_user(
     };
 
     // Check if user already exists
-    if content.lines().any(|line| line.starts_with(&format!("{}:", name))) {
+    if content
+        .lines()
+        .any(|line| line.starts_with(&format!("{}:", name)))
+    {
         return Ok(());
     }
 
@@ -431,7 +436,10 @@ fn ensure_group(ctx: &BuildContext, name: &str, gid: u32) -> Result<()> {
     };
 
     // Check if group already exists
-    if content.lines().any(|line| line.starts_with(&format!("{}:", name))) {
+    if content
+        .lines()
+        .any(|line| line.starts_with(&format!("{}:", name)))
+    {
         return Ok(());
     }
 

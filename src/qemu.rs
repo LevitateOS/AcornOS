@@ -16,9 +16,7 @@ use std::time::{Duration, Instant};
 
 use distro_builder::process::Cmd;
 use distro_spec::acorn::{
-    ISO_FILENAME,
-    QEMU_MEMORY_GB, QEMU_DISK_GB,
-    QEMU_DISK_FILENAME, QEMU_SERIAL_LOG, QEMU_CPU_MODE,
+    ISO_FILENAME, QEMU_CPU_MODE, QEMU_DISK_FILENAME, QEMU_DISK_GB, QEMU_MEMORY_GB, QEMU_SERIAL_LOG,
 };
 
 /// Success patterns - if we see any of these, boot succeeded.
@@ -27,8 +25,8 @@ use distro_spec::acorn::{
 /// Note: "AcornOS Live" is NOT a success pattern - it appears in /etc/issue
 /// before the shell starts, and would match too early.
 const SUCCESS_PATTERNS: &[&str] = &[
-    "___SHELL_READY___",         // Test instrumentation - shell ready for commands
-    "login:",                    // Getty login prompt (only appears without autologin)
+    "___SHELL_READY___", // Test instrumentation - shell ready for commands
+    "login:",            // Getty login prompt (only appears without autologin)
 ];
 
 /// Failure patterns - if we see any of these, boot failed.
@@ -99,9 +97,15 @@ impl QemuBuilder {
         // CD-ROM (use AHCI for consistency with LevitateOS/real hardware)
         if let Some(cdrom) = &self.cdrom {
             cmd.args([
-                "-device", "ahci,id=ahci0",
-                "-device", "ide-cd,drive=cdrom0,bus=ahci0.0",
-                "-drive", &format!("id=cdrom0,if=none,format=raw,readonly=on,file={}", cdrom.display()),
+                "-device",
+                "ahci,id=ahci0",
+                "-device",
+                "ide-cd,drive=cdrom0,bus=ahci0.0",
+                "-drive",
+                &format!(
+                    "id=cdrom0,if=none,format=raw,readonly=on,file={}",
+                    cdrom.display()
+                ),
             ]);
         }
 
@@ -123,16 +127,20 @@ impl QemuBuilder {
 
         // Network: virtio-net with user-mode NAT
         cmd.args([
-            "-netdev", "user,id=net0",
-            "-device", "virtio-net-pci,netdev=net0",
+            "-netdev",
+            "user,id=net0",
+            "-device",
+            "virtio-net-pci,netdev=net0",
         ]);
 
         // Display options
         if let Some(vga) = &self.vga {
             if vga == "virtio" {
                 cmd.args([
-                    "-display", "gtk,gl=on",
-                    "-device", "virtio-gpu-gl,xres=1920,yres=1080",
+                    "-display",
+                    "gtk,gl=on",
+                    "-device",
+                    "virtio-gpu-gl,xres=1920,yres=1080",
                 ]);
             } else {
                 cmd.args(["-vga", vga]);
@@ -294,15 +302,24 @@ pub fn test_iso(base_dir: &Path, timeout_secs: u64) -> Result<()> {
 
     // CD-ROM via AHCI (consistency with LevitateOS/real hardware)
     cmd.args([
-        "-device", "ahci,id=ahci0",
-        "-device", "ide-cd,drive=cdrom0,bus=ahci0.0",
-        "-drive", &format!("id=cdrom0,if=none,format=raw,readonly=on,file={}", iso_path.display()),
+        "-device",
+        "ahci,id=ahci0",
+        "-device",
+        "ide-cd,drive=cdrom0,bus=ahci0.0",
+        "-drive",
+        &format!(
+            "id=cdrom0,if=none,format=raw,readonly=on,file={}",
+            iso_path.display()
+        ),
     ]);
 
     // UEFI firmware
     cmd.args([
         "-drive",
-        &format!("if=pflash,format=raw,readonly=on,file={}", ovmf_path.display()),
+        &format!(
+            "if=pflash,format=raw,readonly=on,file={}",
+            ovmf_path.display()
+        ),
     ]);
 
     // Headless with serial console
@@ -347,7 +364,12 @@ pub fn test_iso(base_dir: &Path, timeout_secs: u64) -> Result<()> {
         // Check overall timeout
         if start.elapsed() > timeout {
             let _ = child.kill();
-            let last_lines = output_buffer.iter().rev().take(20).cloned().collect::<Vec<_>>();
+            let last_lines = output_buffer
+                .iter()
+                .rev()
+                .take(20)
+                .cloned()
+                .collect::<Vec<_>>();
             bail!(
                 "TIMEOUT: Boot did not complete in {}s\n\nLast output:\n{}",
                 timeout_secs,
@@ -367,7 +389,11 @@ pub fn test_iso(base_dir: &Path, timeout_secs: u64) -> Result<()> {
             } else {
                 "No output - QEMU/serial broken"
             };
-            bail!("STALL: {} (no output for {}s)", stage, stall_timeout.as_secs());
+            bail!(
+                "STALL: {} (no output for {}s)",
+                stage,
+                stall_timeout.as_secs()
+            );
         }
 
         match rx.recv_timeout(Duration::from_millis(100)) {
@@ -393,7 +419,12 @@ pub fn test_iso(base_dir: &Path, timeout_secs: u64) -> Result<()> {
                 for pattern in FAILURE_PATTERNS {
                     if line.contains(pattern) {
                         let _ = child.kill();
-                        let last_lines = output_buffer.iter().rev().take(30).cloned().collect::<Vec<_>>();
+                        let last_lines = output_buffer
+                            .iter()
+                            .rev()
+                            .take(30)
+                            .cloned()
+                            .collect::<Vec<_>>();
                         bail!(
                             "BOOT FAILED: {}\n\nContext:\n{}",
                             pattern,
@@ -414,16 +445,12 @@ pub fn test_iso(base_dir: &Path, timeout_secs: u64) -> Result<()> {
                     println!("Running functional verification...\n");
 
                     // Run functional verification
-                    return run_functional_verification(
-                        &mut child,
-                        stdin,
-                        &rx,
-                        start,
-                    );
+                    return run_functional_verification(&mut child, stdin, &rx, start);
                 }
 
                 // Check other success patterns (fallback if test instrumentation missing)
-                for pattern in SUCCESS_PATTERNS.iter().skip(1) {  // Skip ___SHELL_READY___
+                for pattern in SUCCESS_PATTERNS.iter().skip(1) {
+                    // Skip ___SHELL_READY___
                     if line.contains(pattern) {
                         let elapsed = start.elapsed().as_secs_f64();
                         let _ = child.kill();
@@ -454,7 +481,12 @@ pub fn test_iso(base_dir: &Path, timeout_secs: u64) -> Result<()> {
             }
             Err(mpsc::RecvTimeoutError::Timeout) => continue,
             Err(mpsc::RecvTimeoutError::Disconnected) => {
-                let last_lines = output_buffer.iter().rev().take(20).cloned().collect::<Vec<_>>();
+                let last_lines = output_buffer
+                    .iter()
+                    .rev()
+                    .take(20)
+                    .cloned()
+                    .collect::<Vec<_>>();
                 bail!(
                     "QEMU exited unexpectedly\n\nLast output:\n{}",
                     last_lines.into_iter().rev().collect::<Vec<_>>().join("\n")
@@ -508,7 +540,10 @@ fn run_functional_verification(
     // =========================================================================
     println!("Verifying UEFI boot...");
     // Use unique markers that don't appear in the command itself
-    send_cmd(&mut stdin, "test -d /sys/firmware/efi && echo UEFI_YES || echo UEFI_NO")?;
+    send_cmd(
+        &mut stdin,
+        "test -d /sys/firmware/efi && echo UEFI_YES || echo UEFI_NO",
+    )?;
     let response = wait_response(rx, 2000);
 
     // Only check lines that are exactly UEFI_YES or UEFI_NO (not echoed command)
@@ -548,7 +583,8 @@ fn run_functional_verification(
 
     if !pid1_ok {
         let _ = child.kill();
-        let pid1_name = response.iter()
+        let pid1_name = response
+            .iter()
             .find(|l| !l.contains("cat") && !l.contains("___"))
             .cloned()
             .unwrap_or_else(|| "unknown".to_string());
@@ -566,11 +602,15 @@ fn run_functional_verification(
     // Verification 3: Default Runlevel
     // =========================================================================
     println!("Verifying default runlevel...");
-    send_cmd(&mut stdin, "rc-status default 2>/dev/null | grep -c started || echo 0")?;
+    send_cmd(
+        &mut stdin,
+        "rc-status default 2>/dev/null | grep -c started || echo 0",
+    )?;
     let response = wait_response(rx, 3000);
 
     // Look for a number in the response (count of started services)
-    let started_count: u32 = response.iter()
+    let started_count: u32 = response
+        .iter()
         .filter_map(|l| l.trim().parse::<u32>().ok())
         .next()
         .unwrap_or(0);
@@ -584,17 +624,24 @@ fn run_functional_verification(
              OpenRC may not have reached the default runlevel."
         );
     }
-    println!("  ✓ Default runlevel reached ({} services started)\n", started_count);
+    println!(
+        "  ✓ Default runlevel reached ({} services started)\n",
+        started_count
+    );
 
     // =========================================================================
     // Verification 4: Check for crashed services
     // =========================================================================
     println!("Checking for crashed services...");
     // Use tail -n +2 to skip the "Crashed services:" header line, then count non-empty lines
-    send_cmd(&mut stdin, "rc-status --crashed 2>/dev/null | tail -n +2 | grep -c . || echo 0")?;
+    send_cmd(
+        &mut stdin,
+        "rc-status --crashed 2>/dev/null | tail -n +2 | grep -c . || echo 0",
+    )?;
     let response = wait_response(rx, 2000);
 
-    let crashed_count: u32 = response.iter()
+    let crashed_count: u32 = response
+        .iter()
         .filter_map(|l| l.trim().parse::<u32>().ok())
         .next()
         .unwrap_or(0);
@@ -626,7 +673,10 @@ fn run_functional_verification(
     println!("║   ✓ Default runlevel reached                                      ║");
     println!("║   ✓ No crashed services                                           ║");
     println!("╠═══════════════════════════════════════════════════════════════════╣");
-    println!("║ Total time: {:.1}s                                                ║", total_elapsed);
+    println!(
+        "║ Total time: {:.1}s                                                ║",
+        total_elapsed
+    );
     println!("║                                                                   ║");
     println!("║ For FULL installation testing:                                    ║");
     println!("║   cd testing/install-tests && cargo run -- --distro acorn         ║");
