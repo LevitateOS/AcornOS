@@ -348,6 +348,9 @@ pub static SSH: Component = Component {
         dir_mode("run/sshd", 0o755),
         // Copy SSH configuration
         copy_tree("etc/ssh"),
+        // Copy SSH helper binaries (OpenSSH 9.8+ split architecture)
+        // These are REQUIRED: sshd calls sshd-session for each connection
+        copy_tree("usr/lib/ssh"),
         // sshd user and group
         group("sshd", 22),
         user("sshd", 22, 22, "/var/empty/sshd", "/sbin/nologin"),
