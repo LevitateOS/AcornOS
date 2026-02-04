@@ -74,6 +74,9 @@ enum Commands {
         timeout: u64,
     },
 
+    /// Validate host tools and prerequisites (xorriso, mkfs.erofs, etc.)
+    Preflight,
+
     /// Show build status and next steps
     Status,
 }
@@ -103,6 +106,7 @@ fn main() {
         Commands::Iso => cmd_iso(),
         Commands::Run => cmd_run(),
         Commands::Test { timeout } => cmd_test(timeout),
+        Commands::Preflight => cmd_preflight(),
         Commands::Status => cmd_status(),
     };
 
@@ -332,6 +336,25 @@ fn cmd_run() -> Result<()> {
 fn cmd_test(timeout: u64) -> Result<()> {
     let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     acornos::qemu::test_iso(&base_dir, timeout)
+}
+
+fn cmd_preflight() -> Result<()> {
+    use acornos::preflight::PreflightChecker;
+
+    let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let checker = PreflightChecker::new(&base_dir);
+
+    // Run preflight checks (this is async)
+    let rt = tokio::runtime::Runtime::new()?;
+    let report = rt.block_on(async { checker.run_all().await });
+
+    report.print_summary();
+
+    if !report.is_ok() {
+        std::process::exit(1);
+    }
+
+    Ok(())
 }
 
 fn cmd_status() -> Result<()> {
