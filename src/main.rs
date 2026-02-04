@@ -409,6 +409,11 @@ fn cmd_download_alpine() -> Result<()> {
     println!("  ISO:         {}", alpine.iso.display());
     println!("  rootfs:      {}", alpine.rootfs.display());
 
+    // Install Tier 0-2 packages (dependencies for rootfs build)
+    println!("\nInstalling Tier 0-2 packages...");
+    acornos::recipe::packages(&base_dir)?;
+    println!("✓ Packages installed");
+
     Ok(())
 }
 
