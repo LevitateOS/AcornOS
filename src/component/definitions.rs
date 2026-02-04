@@ -116,6 +116,8 @@ const ADDITIONAL_BINS: &[&str] = &[
     // System utilities
     "less",
     "htop",
+    // Privilege escalation (not sudo)
+    "doas",
     // SSH utilities (for sshd)
     "ssh-keygen",
 ];
