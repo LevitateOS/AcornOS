@@ -15,6 +15,7 @@ dirs = "5.0"
 distro-spec = { path = "../distro-spec" }
 distro-builder = { path = "../distro-builder" }
 hex = "0.4"
+recuki = { path = "../tools/recuki" }
 serde_json = "1.0"
 sha2 = "0.10"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "process"] }

@@ -18,6 +18,7 @@ use distro_builder::artifact::iso_utils::{
 };
 use distro_builder::process::Cmd;
 use distro_spec::acorn::{
+    default_loader_config,
     // EFI
     EFIBOOT_FILENAME,
     EFIBOOT_SIZE_MB,
@@ -40,8 +41,12 @@ use distro_spec::acorn::{
     ROOTFS_NAME,
     // Console
     SERIAL_CONSOLE,
+    // UKI
+    UKI_EFI_DIR,
     VGA_CONSOLE,
 };
+
+use super::uki::build_live_ukis;
 
 /// Get ISO volume label from environment or use default.
 fn iso_label() -> String {
@@ -103,6 +108,11 @@ pub fn create_iso(base_dir: &Path) -> Result<()> {
 
     // Stage 4: Copy boot files and artifacts
     copy_iso_artifacts(&paths)?;
+
+    // Stage 4.5: Build UKIs (Unified Kernel Images)
+    let uki_dir = paths.iso_root.join(UKI_EFI_DIR);
+    fs::create_dir_all(&uki_dir)?;
+    build_live_ukis(&paths.kernel, &paths.initramfs_live, &uki_dir)?;
 
     // Stage 5: Set up UEFI boot
     setup_uefi_boot(&paths)?;
@@ -566,6 +576,15 @@ menuentry '{} (Debug)' {{
     fs::create_dir_all(&boot_grub)?;
     fs::write(boot_grub.join("grub.cfg"), &grub_cfg)?;
     fs::write(paths.iso_root.join(ISO_EFI_DIR).join("grub.cfg"), &grub_cfg)?;
+
+    // Create systemd-boot loader.conf
+    // This is placed in the EFI boot image for automatic discovery by systemd-boot
+    println!("  Creating systemd-boot loader.conf...");
+    let loader_config = default_loader_config();
+    let loader_conf_content = loader_config.to_loader_conf();
+    let loader_dir = paths.iso_root.join(ISO_EFI_DIR).join("loader");
+    fs::create_dir_all(&loader_dir)?;
+    fs::write(loader_dir.join("loader.conf"), &loader_conf_content)?;
 
     // Create EFI boot image
     let efiboot_img = paths.output_dir.join(EFIBOOT_FILENAME);
