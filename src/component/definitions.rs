@@ -15,8 +15,9 @@
 use distro_builder::component::Phase;
 
 use super::{
-    bin, bins, copy_tree, custom, dir, dir_mode, dirs, group, openrc_conf, openrc_enable,
-    openrc_scripts, sbins, symlink, user, write_file, write_file_mode, Component, CustomOp,
+    bin, bins, copy_file, copy_tree, custom, dir, dir_mode, dirs, group, openrc_conf,
+    openrc_enable, openrc_scripts, sbins, symlink, user, write_file, write_file_mode, Component,
+    CustomOp,
 };
 
 // =============================================================================
@@ -470,6 +471,9 @@ pub static SYSCONFIG: Component = Component {
         // CRITICAL: Base inittab for all systems (installed and live)
         // LIVE_FINAL overrides this with autologin version for live ISO
         write_file_mode("etc/inittab", BASE_INITTAB, 0o644),
+        // APK repositories - allows `apk add` to work post-boot
+        // Configured with Alpine v3.23 main + community repositories
+        copy_file("etc/apk/repositories"),
         // Copy timezone data
         custom(CustomOp::CopyTimezoneData),
     ],
