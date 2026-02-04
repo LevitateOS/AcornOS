@@ -15,6 +15,10 @@ pub fn create_welcome_message(ctx: &BuildContext) -> Result<()> {
     // Create /etc/issue.net
     fs::write(staging.join("etc/issue.net"), LIVE_ISSUE_MESSAGE)?;
 
+    // Ensure profile.d directory exists
+    let profile_d_path = staging.join("etc/profile.d");
+    fs::create_dir_all(&profile_d_path)?;
+
     // Create a welcome script that runs on login
     let welcome_script = format!(
         r#"#!/bin/sh
@@ -34,12 +38,30 @@ echo ""
     );
 
     let welcome_path = staging.join("etc/profile.d/welcome.sh");
-    if let Some(parent) = welcome_path.parent() {
-        fs::create_dir_all(parent)?;
-    }
     fs::write(&welcome_path, welcome_script)?;
     use std::os::unix::fs::PermissionsExt;
     fs::set_permissions(&welcome_path, fs::Permissions::from_mode(0o755))?;
+
+    // Copy test instrumentation scripts from profile/live-overlay/etc/profile.d/
+    let overlay_profile_d = ctx.base_dir.join("profile/live-overlay/etc/profile.d");
+    if overlay_profile_d.exists() {
+        for entry in fs::read_dir(&overlay_profile_d)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_file() {
+                let file_name = entry.file_name();
+                if let Some(name_str) = file_name.to_str() {
+                    // Skip welcome.sh since we already created it above
+                    if name_str != "welcome.sh" {
+                        let src = path;
+                        let dst = profile_d_path.join(&file_name);
+                        fs::copy(&src, &dst)?;
+                        fs::set_permissions(&dst, fs::Permissions::from_mode(0o755))?;
+                    }
+                }
+            }
+        }
+    }
 
     Ok(())
 }
