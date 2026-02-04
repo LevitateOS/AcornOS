@@ -83,3 +83,114 @@ pub fn alpine(base_dir: &Path) -> Result<AlpinePaths> {
 
     Ok(paths)
 }
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+    use std::path::Path;
+
+    /// Verify that the extracted rootfs contains the FHS directory structure
+    /// and all required packages (musl, busybox, apk-tools at minimum).
+    #[test]
+    fn test_extracted_rootfs_structure() {
+        // This test assumes alpine.rhai has been run already
+        let acorn_dir = Path::new("/home/vince/Projects/LevitateOS/AcornOS");
+        let rootfs = acorn_dir.join("downloads/rootfs");
+
+        // Skip if rootfs doesn't exist (test environment may not have run alpine.rhai)
+        if !rootfs.exists() {
+            eprintln!("Skipping rootfs structure test (rootfs not extracted yet)");
+            return;
+        }
+
+        // === FHS Directory Structure ===
+        // Required: /bin, /etc, /lib, /usr, /var, /tmp, /proc, /sys, /dev, /run, /home, /root
+        let required_dirs = vec![
+            "bin", "etc", "lib", "usr", "var", "tmp", "proc", "sys", "dev", "run", "home", "root",
+        ];
+
+        for dir in required_dirs {
+            let path = rootfs.join(dir);
+            assert!(
+                path.is_dir(),
+                "Missing required FHS directory: {}/{}",
+                rootfs.display(),
+                dir
+            );
+        }
+
+        // === musl C library ===
+        let musl_ld = rootfs.join("lib/ld-musl-x86_64.so.1");
+        assert!(
+            musl_ld.is_file(),
+            "Missing musl libc loader: {}",
+            musl_ld.display()
+        );
+
+        let musl_link = rootfs.join("lib/libc.musl-x86_64.so.1");
+        assert!(
+            musl_link.is_symlink(),
+            "Missing musl libc symlink: {}",
+            musl_link.display()
+        );
+
+        // === busybox ===
+        let busybox = rootfs.join("bin/busybox");
+        assert!(busybox.is_file(), "Missing busybox: {}", busybox.display());
+
+        // Verify busybox has symlinks to shell and other core utilities
+        // Note: sh and ash must be busybox, but other utilities may be from coreutils
+        let shell_commands = vec!["sh", "ash"];
+        for cmd in shell_commands {
+            let link = rootfs.join(format!("bin/{}", cmd));
+            assert!(
+                link.is_symlink(),
+                "Missing shell command symlink: bin/{}",
+                cmd
+            );
+            let target = fs::read_link(&link).expect("Failed to read symlink");
+            assert_eq!(
+                target.to_string_lossy(),
+                "/bin/busybox",
+                "Shell command {} should point to busybox",
+                cmd
+            );
+        }
+
+        // Verify busybox is executable
+        let metadata = fs::metadata(&busybox).expect("Failed to read busybox metadata");
+        assert!(metadata.is_file(), "busybox is not a file");
+        #[cfg(unix)]
+        {
+            assert!(
+                metadata.permissions().mode() & 0o111 != 0,
+                "busybox is not executable"
+            );
+        }
+
+        // === apk-tools ===
+        let apk = rootfs.join("sbin/apk");
+        assert!(apk.is_file(), "Missing apk-tools: {}", apk.display());
+
+        // === APK repositories configured ===
+        let repos_file = rootfs.join("etc/apk/repositories");
+        assert!(
+            repos_file.is_file(),
+            "Missing APK repositories: {}",
+            repos_file.display()
+        );
+
+        let repos_content =
+            fs::read_to_string(&repos_file).expect("Failed to read APK repositories");
+        assert!(
+            repos_content.contains("main"),
+            "APK repositories missing Alpine main"
+        );
+        assert!(
+            repos_content.contains("community"),
+            "APK repositories missing Alpine community"
+        );
+    }
+}
