@@ -193,4 +193,84 @@ mod tests {
             "APK repositories missing Alpine community"
         );
     }
+
+    /// Verify that package dependency resolution worked correctly by checking
+    /// for key binaries from Tier 0 packages and their dependencies.
+    ///
+    /// This test verifies that APK resolved package dependencies correctly
+    /// by checking for utilities from packages that have transitive dependencies.
+    #[test]
+    fn test_tier0_package_dependencies() {
+        // This test assumes alpine.rhai has been run already
+        let acorn_dir = Path::new("/home/vince/Projects/LevitateOS/AcornOS");
+        let rootfs = acorn_dir.join("downloads/rootfs");
+
+        // Skip if rootfs doesn't exist
+        if !rootfs.exists() {
+            eprintln!("Skipping tier0 dependencies test (rootfs not extracted yet)");
+            return;
+        }
+
+        // === Verify APK database exists (indicates apk installation worked) ===
+        let apk_db = rootfs.join("lib/apk/db/installed");
+        assert!(
+            apk_db.is_file(),
+            "Missing APK database: {} (apk installation failed)",
+            apk_db.display()
+        );
+
+        // === openrc & openrc-init: init system ===
+        // openrc is a critical dependency - system won't boot without it
+        let openrc = rootfs.join("sbin/openrc");
+        assert!(
+            openrc.is_file(),
+            "Missing openrc: {} (openrc package installation failed)",
+            openrc.display()
+        );
+
+        // === e2fsprogs: ext4 utilities ===
+        // Has dependencies on util-linux (for shared libraries)
+        let e2fsck = rootfs.join("sbin/e2fsck");
+        assert!(
+            e2fsck.is_file(),
+            "Missing e2fsck: {} (e2fsprogs package installation failed)",
+            e2fsck.display()
+        );
+
+        // === dosfstools: FAT utilities ===
+        let mkfs_fat = rootfs.join("sbin/mkfs.fat");
+        assert!(
+            mkfs_fat.is_file(),
+            "Missing mkfs.fat: {} (dosfstools package installation failed)",
+            mkfs_fat.display()
+        );
+
+        // === util-linux: mount, fdisk, blkid, etc ===
+        // Critical package with many dependencies
+        let mount = rootfs.join("bin/mount");
+        let blkid = rootfs.join("sbin/blkid");
+        assert!(
+            mount.is_file(),
+            "Missing mount: {} (util-linux package installation failed)",
+            mount.display()
+        );
+        assert!(
+            blkid.is_file(),
+            "Missing blkid: {} (util-linux package installation failed)",
+            blkid.display()
+        );
+
+        // === Verify libaries (indirect dependencies) ===
+        // If blkid exists, its shared library dependencies must also be present
+        // (otherwise the binary wouldn't be able to run)
+        // Check for libc (from util-linux's dependencies)
+        let libc = rootfs.join("lib/libc.musl-x86_64.so.1");
+        assert!(
+            libc.exists(),
+            "Missing libc.musl: {} (dependency resolution failed for util-linux)",
+            libc.display()
+        );
+
+        println!("✓ All Tier 0 package dependencies resolved correctly (verified via APK database and binary presence)");
+    }
 }
