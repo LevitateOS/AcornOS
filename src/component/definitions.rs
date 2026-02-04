@@ -127,6 +127,9 @@ const ADDITIONAL_SBINS: &[&str] = &[
     "openrc-shutdown",
     // OpenRC utilities (used by init scripts)
     "start-stop-daemon",
+    // Device manager (eudev for udev device management)
+    "udevd",
+    "udevadm",
     // Login (required for inittab)
     "agetty",
     // Partitioning
