@@ -351,9 +351,10 @@ pub static SSH: Component = Component {
         // sshd user and group
         group("sshd", 22),
         user("sshd", 22, 22, "/var/empty/sshd", "/sbin/nologin"),
-        // DISABLED: sshd needs more files (/usr/lib/ssh/sshd-session)
-        // TODO: Fix sshd dependencies and re-enable
-        // openrc_enable("sshd", "default"),
+        // Generate host keys and configure sshd for live ISO
+        custom(CustomOp::SetupSsh),
+        // Enable sshd in default runlevel
+        openrc_enable("sshd", "default"),
     ],
 };
 

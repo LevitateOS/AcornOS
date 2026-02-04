@@ -215,6 +215,8 @@ pub enum CustomOp {
     /// Copy all shared libraries from source rootfs.
     /// Required because host glibc ldd can't analyze musl binaries.
     CopyAllLibraries,
+    /// Generate SSH host keys and configure sshd.
+    SetupSsh,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

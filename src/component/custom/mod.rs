@@ -9,6 +9,7 @@ mod filesystem;
 mod firmware;
 mod live;
 mod modules;
+mod ssh;
 
 use anyhow::Result;
 
@@ -51,5 +52,8 @@ pub fn execute(ctx: &BuildContext, op: CustomOp) -> Result<()> {
 
         // Libraries
         CustomOp::CopyAllLibraries => filesystem::copy_all_libraries(ctx),
+
+        // SSH
+        CustomOp::SetupSsh => ssh::setup_ssh(ctx),
     }
 }
