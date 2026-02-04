@@ -82,7 +82,13 @@ fn configure_sshd(ssh_dir: &std::path::Path) -> Result<()> {
     ];
 
     for (setting, value) in critical_settings {
-        if !config.contains(&format!("{} {}", setting, value)) {
+        // Check if the setting is active (uncommented) with the correct value.
+        // We need to check line-by-line to avoid matching commented-out lines
+        // (e.g., "#PermitRootLogin yes" contains "PermitRootLogin yes" as substring).
+        let target = format!("{} {}", setting, value);
+        let already_set = config.lines().any(|line| line.trim() == target);
+
+        if !already_set {
             // Comment out any existing lines with this setting
             let lines: Vec<&str> = config.lines().collect();
             let mut new_lines = Vec::new();
