@@ -18,7 +18,7 @@ use std::path::Path;
 
 use distro_spec::acorn::{INITRAMFS_LIVE_OUTPUT, ISO_FILENAME, ROOTFS_NAME};
 
-use crate::cache;
+use distro_builder::cache;
 
 /// Check if kernel needs to be compiled.
 ///
