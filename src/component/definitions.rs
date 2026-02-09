@@ -421,6 +421,8 @@ pub static BRANDING: Component = Component {
     ops: &[
         // OS identity
         write_file("etc/os-release", OS_RELEASE),
+        // Canonical location per FreeDesktop os-release spec
+        write_file("usr/lib/os-release", OS_RELEASE),
         write_file("etc/hostname", "acornos\n"),
         write_file("etc/motd", MOTD),
         write_file("etc/issue", ISSUE),

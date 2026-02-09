@@ -13,7 +13,7 @@
 //!   ops: [                               execute_op(ctx, op)?;
 //!     dir("etc/init.d"),               }
 //!     openrc_enable("networking", "boot"),
-//!     custom(CreateOsRelease),
+//!     custom(CreateFhsSymlinks),
 //!   ]
 //! }
 //! ```
@@ -183,22 +183,14 @@ pub enum Op {
 pub enum CustomOp {
     /// Create FHS symlinks (merged /usr).
     CreateFhsSymlinks,
-    /// Create AcornOS /etc/os-release.
-    CreateOsRelease,
-    /// Create AcornOS MOTD and issue files.
-    CreateBranding,
     /// Create busybox applet symlinks.
     CreateBusyboxApplets,
     /// Setup mdev or eudev device manager.
     SetupDeviceManager,
     /// Copy kernel modules and run depmod.
     CopyModules,
-    /// Run depmod for kernel modules.
-    RunDepmod,
-    /// Copy WiFi firmware.
+    /// Copy WiFi firmware directories.
     CopyWifiFirmware,
-    /// Copy all firmware.
-    CopyAllFirmware,
     /// Create /etc configuration files.
     CreateEtcFiles,
     /// Create security configuration (login.defs, etc.).
@@ -345,8 +337,8 @@ mod tests {
     #[test]
     fn test_custom_ops() {
         assert!(matches!(
-            custom(CustomOp::CreateOsRelease),
-            Op::Custom(CustomOp::CreateOsRelease)
+            custom(CustomOp::CreateFhsSymlinks),
+            Op::Custom(CustomOp::CreateFhsSymlinks)
         ));
     }
 }
