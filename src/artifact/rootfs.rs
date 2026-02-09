@@ -93,7 +93,7 @@ pub fn build_rootfs(base_dir: &Path) -> Result<()> {
     }
 
     // Create build context
-    let ctx = BuildContext::new(base_dir, &staging)?;
+    let ctx = BuildContext::new(base_dir, &staging, "acornos extract")?;
 
     // Execute component system
     build_system(&ctx)?;
