@@ -112,12 +112,9 @@ impl BuildContext {
             PathBuf::from("sbin").join(name),
         ];
 
-        for candidate in candidates {
-            if self.source.join(&candidate).exists() {
-                return Some(candidate);
-            }
-        }
-        None
+        candidates
+            .into_iter()
+            .find(|candidate| self.source.join(candidate).exists())
     }
 }
 

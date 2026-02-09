@@ -58,7 +58,8 @@ pub fn create_applet_symlinks(ctx: &BuildContext) -> Result<()> {
     // Create essential symlinks in /usr/bin that may be needed
     // Note: /bin is a symlink to /usr/bin (merged-usr), so we put these in usr/bin directly
     // The FHS symlinks are created by FILESYSTEM component before this runs
-    for name in &["sh"] {
+    {
+        let name = "sh";
         let link = bin_dir.join(name);
         if !link.exists() && !link.is_symlink() {
             std::os::unix::fs::symlink("/usr/bin/busybox", &link)?;

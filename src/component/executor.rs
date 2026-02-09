@@ -125,7 +125,7 @@ fn execute_op(ctx: &BuildContext, op: &Op) -> Result<()> {
         Op::Sbins(names) => {
             let mut missing = Vec::new();
             for name in *names {
-                if let Err(_) = copy_binary(ctx, name, "usr/sbin") {
+                if copy_binary(ctx, name, "usr/sbin").is_err() {
                     missing.push(*name);
                 }
             }
@@ -279,7 +279,7 @@ fn extract_library_path(line: &str) -> Option<String> {
     // Format: "libfoo.so.1 => /usr/lib/libfoo.so.1 (0x...)"
     if let Some(arrow_pos) = line.find("=>") {
         let after_arrow = &line[arrow_pos + 2..];
-        let parts: Vec<&str> = after_arrow.trim().split_whitespace().collect();
+        let parts: Vec<&str> = after_arrow.split_whitespace().collect();
         if let Some(path) = parts.first() {
             if path.starts_with('/') {
                 return Some(path.to_string());

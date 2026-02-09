@@ -144,12 +144,10 @@ fn copy_firmware_tree(src: &Path, dst: &Path) -> Result<u64> {
             }
         } else if src_path.is_dir() {
             total_size += copy_firmware_tree(&src_path, &dst_path)?;
-        } else {
-            if !dst_path.exists() {
-                let metadata = fs::metadata(&src_path)?;
-                total_size += metadata.len();
-                fs::copy(&src_path, &dst_path)?;
-            }
+        } else if !dst_path.exists() {
+            let metadata = fs::metadata(&src_path)?;
+            total_size += metadata.len();
+            fs::copy(&src_path, &dst_path)?;
         }
     }
 
