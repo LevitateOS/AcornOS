@@ -6,9 +6,9 @@
 use anyhow::Result;
 use std::fs;
 
-use super::context::BuildContext;
 use super::definitions::ALL_COMPONENTS;
 use super::executor;
+use super::BuildContext;
 
 /// Build the complete AcornOS system.
 ///

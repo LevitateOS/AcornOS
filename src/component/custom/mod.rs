@@ -4,23 +4,18 @@
 //! Each module handles a specific domain of custom operations.
 
 mod branding;
-mod busybox;
-mod filesystem;
-mod firmware;
 mod live;
-mod modules;
-mod ssh;
 
 use anyhow::Result;
 
-use super::context::BuildContext;
+use super::BuildContext;
 use super::CustomOp;
 
 /// Execute a custom operation.
 pub fn execute(ctx: &BuildContext, op: CustomOp) -> Result<()> {
     match op {
         // Filesystem operations
-        CustomOp::CreateFhsSymlinks => filesystem::create_fhs_symlinks(ctx),
+        CustomOp::CreateFhsSymlinks => distro_builder::alpine::filesystem::create_fhs_symlinks(ctx),
 
         // Branding
         CustomOp::CreateOsRelease => branding::create_os_release(ctx),
@@ -29,18 +24,24 @@ pub fn execute(ctx: &BuildContext, op: CustomOp) -> Result<()> {
         CustomOp::CreateSecurityConfig => branding::create_security_config(ctx),
 
         // Busybox
-        CustomOp::CreateBusyboxApplets => busybox::create_applet_symlinks(ctx),
+        CustomOp::CreateBusyboxApplets => {
+            distro_builder::alpine::busybox::create_applet_symlinks(ctx)
+        }
 
         // Device manager
-        CustomOp::SetupDeviceManager => filesystem::setup_device_manager(ctx),
+        CustomOp::SetupDeviceManager => {
+            distro_builder::alpine::filesystem::setup_device_manager(ctx)
+        }
 
         // Kernel modules
-        CustomOp::CopyModules => modules::copy_modules(ctx),
-        CustomOp::RunDepmod => modules::run_depmod(ctx),
+        CustomOp::CopyModules => {
+            distro_builder::alpine::modules::copy_modules(ctx, "acornos build kernel")
+        }
+        CustomOp::RunDepmod => distro_builder::alpine::modules::run_depmod(ctx),
 
         // Firmware
-        CustomOp::CopyWifiFirmware => firmware::copy_wifi_firmware(ctx),
-        CustomOp::CopyAllFirmware => firmware::copy_all_firmware(ctx),
+        CustomOp::CopyWifiFirmware => distro_builder::alpine::firmware::copy_wifi_firmware(ctx),
+        CustomOp::CopyAllFirmware => distro_builder::alpine::firmware::copy_all_firmware(ctx),
 
         // Timezone
         CustomOp::CopyTimezoneData => branding::copy_timezone_data(ctx),
@@ -51,9 +52,9 @@ pub fn execute(ctx: &BuildContext, op: CustomOp) -> Result<()> {
         CustomOp::CopyRecstrap => live::copy_recstrap(ctx),
 
         // Libraries
-        CustomOp::CopyAllLibraries => filesystem::copy_all_libraries(ctx),
+        CustomOp::CopyAllLibraries => distro_builder::alpine::filesystem::copy_all_libraries(ctx),
 
         // SSH
-        CustomOp::SetupSsh => ssh::setup_ssh(ctx),
+        CustomOp::SetupSsh => distro_builder::alpine::ssh::setup_ssh(ctx, "root@acornos"),
     }
 }

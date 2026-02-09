@@ -59,7 +59,7 @@ use distro_spec::acorn::{
 };
 
 use crate::component::{build_system, BuildContext};
-use crate::extract::ExtractPaths;
+use distro_builder::alpine::extract::ExtractPaths;
 
 /// Build the EROFS rootfs using the component system.
 ///
@@ -113,7 +113,13 @@ pub fn build_rootfs(base_dir: &Path) -> Result<()> {
         EROFS_COMPRESSION, EROFS_COMPRESSION_LEVEL
     );
 
-    let result = create_erofs_internal(&staging, &work_output);
+    let result = distro_builder::create_erofs(
+        &staging,
+        &work_output,
+        EROFS_COMPRESSION,
+        EROFS_COMPRESSION_LEVEL,
+        EROFS_CHUNK_SIZE,
+    );
 
     // On failure, clean up work file
     if let Err(e) = result {
@@ -147,18 +153,4 @@ fn check_host_tools() -> Result<()> {
         );
     }
     Ok(())
-}
-
-/// Create an EROFS image from a directory.
-///
-/// Uses the shared implementation from `distro_builder::create_erofs`.
-fn create_erofs_internal(source: &Path, output: &Path) -> Result<()> {
-    // Use the shared distro-builder implementation with AcornOS-specific settings
-    distro_builder::create_erofs(
-        source,
-        output,
-        EROFS_COMPRESSION,
-        EROFS_COMPRESSION_LEVEL,
-        EROFS_CHUNK_SIZE,
-    )
 }

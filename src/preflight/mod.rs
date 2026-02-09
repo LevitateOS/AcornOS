@@ -211,7 +211,7 @@ impl PreflightChecker {
 
     /// Check what's already cached.
     fn check_cache_status(&self) -> CacheStatus {
-        use crate::extract::ExtractPaths;
+        use distro_builder::alpine::extract::ExtractPaths;
 
         let paths = ExtractPaths::new(&self.base_dir);
         let downloads = self.base_dir.join("downloads");

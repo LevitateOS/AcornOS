@@ -5,7 +5,7 @@
 use anyhow::Result;
 use std::fs;
 
-use super::super::context::BuildContext;
+use crate::component::BuildContext;
 use distro_spec::acorn::{LIVE_ISSUE_MESSAGE, OS_NAME};
 
 /// Create welcome message for live ISO.

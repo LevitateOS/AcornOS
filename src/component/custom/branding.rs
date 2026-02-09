@@ -5,7 +5,7 @@
 use anyhow::Result;
 use std::fs;
 
-use super::super::context::BuildContext;
+use crate::component::BuildContext;
 use distro_spec::acorn::{OS_ID, OS_NAME, OS_VERSION};
 
 /// Create /etc/os-release for AcornOS.

@@ -9,7 +9,7 @@ use std::path::Path;
 
 use distro_builder::executor::{binaries, directories, files, openrc, users};
 
-use super::context::BuildContext;
+use super::BuildContext;
 use super::{Component, Op};
 
 /// Execute all operations in a component.

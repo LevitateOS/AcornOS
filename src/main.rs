@@ -141,7 +141,7 @@ fn main() {
 }
 
 fn cmd_build() -> Result<()> {
-    use acornos::Timer;
+    use distro_builder::alpine::timing::Timer;
     use std::time::Instant;
 
     // Full build: kernel + EROFS + initramfs + ISO
@@ -234,7 +234,7 @@ fn cmd_build() -> Result<()> {
 }
 
 fn cmd_build_kernel(clean: bool) -> Result<()> {
-    use acornos::Timer;
+    use distro_builder::alpine::timing::Timer;
 
     let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     // Linux kernel source is at the workspace root (shared with leviso)
@@ -397,15 +397,19 @@ fn cmd_download_all() -> Result<()> {
     println!("Resolving all dependencies...\n");
 
     // Alpine ISO and packages
-    let alpine = acornos::recipe::alpine(&base_dir)?;
+    let alpine = distro_builder::recipe::alpine::alpine(&base_dir)?;
+    distro_builder::alpine::keys::install_keys(
+        &alpine.rootfs,
+        distro_spec::acorn::packages::ALPINE_KEYS,
+    )?;
     println!("Alpine:  {} [OK]", alpine.iso.display());
 
     // Linux kernel
-    let linux = distro_builder::recipe::linux::linux(&base_dir, "AcornOS")?;
+    let linux = distro_builder::recipe::linux::linux(&base_dir)?;
     println!("Linux:   {} [OK]", linux.source.display());
 
     // Installation tools
-    distro_builder::recipe::install_tools(&base_dir, "AcornOS")?;
+    distro_builder::recipe::install_tools(&base_dir)?;
 
     println!("\nAll dependencies resolved.");
     Ok(())
@@ -413,7 +417,11 @@ fn cmd_download_all() -> Result<()> {
 
 fn cmd_download_alpine() -> Result<()> {
     let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let alpine = acornos::recipe::alpine(&base_dir)?;
+    let alpine = distro_builder::recipe::alpine::alpine(&base_dir)?;
+    distro_builder::alpine::keys::install_keys(
+        &alpine.rootfs,
+        distro_spec::acorn::packages::ALPINE_KEYS,
+    )?;
 
     println!("Alpine ISO and packages:");
     println!("  ISO:         {}", alpine.iso.display());
@@ -421,7 +429,7 @@ fn cmd_download_alpine() -> Result<()> {
 
     // Install Tier 0-2 packages (dependencies for rootfs build)
     println!("\nInstalling Tier 0-2 packages...");
-    distro_builder::recipe::packages(&base_dir, "AcornOS")?;
+    distro_builder::recipe::packages(&base_dir)?;
     println!("✓ Packages installed");
 
     Ok(())
@@ -429,7 +437,7 @@ fn cmd_download_alpine() -> Result<()> {
 
 fn cmd_download_linux() -> Result<()> {
     let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let linux = distro_builder::recipe::linux::linux(&base_dir, "AcornOS")?;
+    let linux = distro_builder::recipe::linux::linux(&base_dir)?;
 
     println!("Linux kernel:");
     println!("  Source:      {}", linux.source.display());
@@ -452,7 +460,7 @@ fn cmd_download_tools() -> Result<()> {
     let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
 
     println!("Installing tools via recipes...\n");
-    distro_builder::recipe::install_tools(&base_dir, "AcornOS")?;
+    distro_builder::recipe::install_tools(&base_dir)?;
 
     // Show what was installed
     let staging_bin = base_dir.join("output/staging/usr/bin");
@@ -473,7 +481,7 @@ fn cmd_download_tools() -> Result<()> {
 
 fn cmd_status() -> Result<()> {
     use acornos::config::AcornConfig;
-    use acornos::extract::ExtractPaths;
+    use distro_builder::alpine::extract::ExtractPaths;
     use distro_builder::DistroConfig;
 
     let config = AcornConfig;

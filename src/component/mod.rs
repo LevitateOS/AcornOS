@@ -29,14 +29,13 @@
 //! | Library paths | /usr/lib64 (glibc) | /usr/lib (musl) |
 
 pub mod builder;
-pub mod context;
 pub mod custom;
 pub mod definitions;
 pub mod executor;
 
 pub use builder::build_system;
-pub use context::BuildContext;
 pub use definitions::*;
+pub use distro_builder::alpine::context::BuildContext;
 
 // Re-export from distro-builder for convenience
 pub use distro_builder::component::{Installable, Phase};
