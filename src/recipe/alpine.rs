@@ -1,9 +1,9 @@
 //! Alpine Linux dependency via recipe.
 
-use super::{find_recipe, run_recipe_json};
 use crate::keys;
 use anyhow::{bail, Result};
 use distro_builder::process::ensure_exists;
+use distro_builder::recipe::{find_recipe, run_recipe_json};
 use std::path::{Path, PathBuf};
 
 /// Paths produced by the alpine.rhai recipe after execution.
