@@ -1,45 +1,17 @@
-//! Recipe binary resolution and execution for AcornOS.
+//! AcornOS-specific recipe modules.
 //!
-//! Thin wrappers over `distro_builder::recipe` with AcornOS-specific configuration.
-//! Alpine recipe is kept here since AcornOS has unique key installation logic.
+//! Alpine recipe has AcornOS-specific key installation logic.
+//! All other recipe functionality is used directly from `distro_builder::recipe`.
 
 mod alpine;
-mod linux;
 
 pub use alpine::{alpine, AlpinePaths};
-pub use linux::{has_linux_source, linux, LinuxPaths};
-
-// Re-export shared types used by callers
-pub use distro_builder::recipe::RecipeBinary;
-
-use anyhow::Result;
-use std::path::Path;
-
-/// Run the tool recipes to install recstrap, recfstab, recchroot to staging.
-pub fn install_tools(base_dir: &Path) -> Result<()> {
-    distro_builder::recipe::install_tools(base_dir, "AcornOS")
-}
-
-/// Run the packages.rhai recipe to extract and install Alpine packages into rootfs.
-pub fn packages(base_dir: &Path) -> Result<()> {
-    distro_builder::recipe::packages(base_dir, "AcornOS")
-}
-
-/// Clear the recipe cache directory (~/.cache/levitate/).
-pub fn clear_cache() -> Result<()> {
-    distro_builder::recipe::clear_cache()
-}
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::fs;
     use std::path::Path;
 
-    /// Verify that package dependency resolution works by checking:
-    /// 1. All explicitly requested packages are installed
-    /// 2. Transitive dependencies are also present
-    /// 3. APK dependency information is properly recorded
     #[test]
     fn test_package_dependency_resolution() {
         let acorn_dir = Path::new("/home/vince/Projects/LevitateOS/AcornOS");
@@ -110,7 +82,6 @@ mod tests {
         eprintln!("✓ Package dependency resolution verified");
     }
 
-    /// Verify that Alpine signing keys are correctly set up for package verification.
     #[test]
     fn test_alpine_keys_setup() {
         let acorn_dir = Path::new("/home/vince/Projects/LevitateOS/AcornOS");
@@ -150,12 +121,5 @@ mod tests {
                 eprintln!("ℹ APK repositories using HTTP (not HTTPS)");
             }
         }
-    }
-
-    /// Verify that packages() function exists and is callable.
-    #[test]
-    fn test_packages_function_integration() {
-        let _ = packages as fn(&Path) -> Result<()>;
-        eprintln!("✓ packages() function signature verified");
     }
 }

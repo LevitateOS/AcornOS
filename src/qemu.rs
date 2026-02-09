@@ -77,17 +77,3 @@ pub fn run_iso(base_dir: &Path, disk_size: Option<String>) -> Result<()> {
 
     Ok(())
 }
-
-/// Test the ISO by booting headless and watching serial output.
-pub fn test_iso(base_dir: &Path, timeout_secs: u64) -> Result<()> {
-    let iso_path = base_dir.join("output").join(ISO_FILENAME);
-
-    distro_builder::qemu::test_iso_boot(
-        &iso_path,
-        timeout_secs,
-        "acorn",
-        "00-acorn-test.sh",
-        QEMU_CPU_MODE,
-        QEMU_MEMORY_GB,
-    )
-}

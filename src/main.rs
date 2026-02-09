@@ -359,7 +359,17 @@ fn cmd_run() -> Result<()> {
 
 fn cmd_test(timeout: u64) -> Result<()> {
     let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    acornos::qemu::test_iso(&base_dir, timeout)
+    let iso_path = base_dir
+        .join("output")
+        .join(distro_spec::acorn::ISO_FILENAME);
+    distro_builder::qemu::test_iso_boot(
+        &iso_path,
+        timeout,
+        "acorn",
+        "00-acorn-test.sh",
+        distro_spec::acorn::QEMU_CPU_MODE,
+        distro_spec::acorn::QEMU_MEMORY_GB,
+    )
 }
 
 fn cmd_preflight() -> Result<()> {
@@ -391,11 +401,11 @@ fn cmd_download_all() -> Result<()> {
     println!("Alpine:  {} [OK]", alpine.iso.display());
 
     // Linux kernel
-    let linux = acornos::recipe::linux(&base_dir)?;
+    let linux = distro_builder::recipe::linux::linux(&base_dir, "AcornOS")?;
     println!("Linux:   {} [OK]", linux.source.display());
 
     // Installation tools
-    acornos::recipe::install_tools(&base_dir)?;
+    distro_builder::recipe::install_tools(&base_dir, "AcornOS")?;
 
     println!("\nAll dependencies resolved.");
     Ok(())
@@ -411,7 +421,7 @@ fn cmd_download_alpine() -> Result<()> {
 
     // Install Tier 0-2 packages (dependencies for rootfs build)
     println!("\nInstalling Tier 0-2 packages...");
-    acornos::recipe::packages(&base_dir)?;
+    distro_builder::recipe::packages(&base_dir, "AcornOS")?;
     println!("✓ Packages installed");
 
     Ok(())
@@ -419,7 +429,7 @@ fn cmd_download_alpine() -> Result<()> {
 
 fn cmd_download_linux() -> Result<()> {
     let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let linux = acornos::recipe::linux(&base_dir)?;
+    let linux = distro_builder::recipe::linux::linux(&base_dir, "AcornOS")?;
 
     println!("Linux kernel:");
     println!("  Source:      {}", linux.source.display());
@@ -442,7 +452,7 @@ fn cmd_download_tools() -> Result<()> {
     let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
 
     println!("Installing tools via recipes...\n");
-    acornos::recipe::install_tools(&base_dir)?;
+    distro_builder::recipe::install_tools(&base_dir, "AcornOS")?;
 
     // Show what was installed
     let staging_bin = base_dir.join("output/staging/usr/bin");
