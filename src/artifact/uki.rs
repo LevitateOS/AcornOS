@@ -12,8 +12,7 @@ use anyhow::Result;
 use std::path::{Path, PathBuf};
 
 use distro_spec::acorn::{
-    ISO_LABEL, OS_ID, OS_NAME, OS_VERSION, SERIAL_CONSOLE, UKI_ENTRIES, UKI_INSTALLED_ENTRIES,
-    VGA_CONSOLE,
+    ISO_LABEL, OS_ID, OS_NAME, OS_VERSION, UKI_ENTRIES, UKI_INSTALLED_ENTRIES,
 };
 use recuki::UkiConfig;
 
@@ -59,11 +58,8 @@ pub fn build_live_ukis(kernel: &Path, initramfs: &Path, output_dir: &Path) -> Re
     println!("Building UKIs for live ISO boot...");
 
     // Base cmdline for live boot
-    // VGA first, serial last so /dev/console -> serial for testing
-    let base_cmdline = format!(
-        "root=LABEL={} {} {}",
-        ISO_LABEL, VGA_CONSOLE, SERIAL_CONSOLE
-    );
+    // Console parameters are in each UKI entry's extra_cmdline (from distro-spec)
+    let base_cmdline = format!("root=LABEL={}", ISO_LABEL);
 
     let mut outputs = Vec::new();
 
@@ -112,8 +108,9 @@ pub fn build_installed_ukis(
 
     // Base cmdline for installed systems
     // Uses root=LABEL=root - user must label their root partition accordingly
+    // Console parameters are in each UKI entry's extra_cmdline (from distro-spec)
     // Can be edited at boot time if needed (systemd-boot allows editing)
-    let base_cmdline = format!("root=LABEL=root rw {} {}", VGA_CONSOLE, SERIAL_CONSOLE);
+    let base_cmdline = "root=LABEL=root rw".to_string();
 
     let mut outputs = Vec::new();
 
@@ -139,14 +136,11 @@ mod tests {
 
     #[test]
     fn test_base_cmdline_format() {
-        let cmdline = format!(
-            "root=LABEL={} {} {}",
-            ISO_LABEL, VGA_CONSOLE, SERIAL_CONSOLE
-        );
+        let cmdline = format!("root=LABEL={}", ISO_LABEL);
 
         assert!(cmdline.contains(&format!("root=LABEL={}", ISO_LABEL)));
-        assert!(cmdline.contains("console=ttyS0"));
-        assert!(cmdline.contains("console=tty0"));
+        // Console parameters come from entry extra_cmdline, not base cmdline
+        assert!(!cmdline.contains("console="));
     }
 
     #[test]
