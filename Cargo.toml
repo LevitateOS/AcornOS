@@ -16,6 +16,7 @@ distro-builder = { path = "../distro-builder" }
 recinit = { path = "../tools/recinit" }
 reciso = { path = "../tools/reciso" }
 recuki = { path = "../tools/recuki" }
+fsdbg = { path = "../testing/fsdbg" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "process"] }
 
 [dev-dependencies]

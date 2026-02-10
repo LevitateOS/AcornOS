@@ -4,56 +4,19 @@
 //! - Live boot environment (mounted read-only with tmpfs overlay)
 //! - Installation source (extracted to disk by recstrap)
 //!
-//! # EROFS vs Squashfs
+//! # Atomicity
 //!
-//! AcornOS uses EROFS (Enhanced Read-Only File System) because:
-//! - Better random-access performance (no linear directory search)
-//! - Fixed 4KB output blocks (better disk I/O alignment)
-//! - Lower memory overhead during decompression
-//! - Used by Fedora 42+, RHEL 10, Android
-//! - Shared implementation with LevitateOS (no code duplication)
-//!
-//! # Architecture
-//!
-//! ```text
-//! Build Flow:
-//! downloads/rootfs (Alpine packages)
-//!         |
-//! Component System (FILESYSTEM, BUSYBOX, OPENRC, BRANDING, ...)
-//!         |
-//! output/rootfs-staging (staging)
-//!         |
-//! output/filesystem.erofs
-//!
-//! ISO Contents:
-//! +-- boot/
-//! |   +-- vmlinuz              # Alpine LTS kernel
-//! |   +-- initramfs.img        # Tiny (~5MB) - busybox + mount logic
-//! +-- live/
-//! |   +-- filesystem.erofs     # Complete system (~200MB)
-//! +-- EFI/BOOT/
-//!     +-- BOOTX64.EFI
-//!     +-- grub.cfg
-//!
-//! Live Boot Flow:
-//! 1. GRUB loads kernel + tiny initramfs
-//! 2. Tiny init mounts ISO by LABEL
-//! 3. Mounts filesystem.erofs read-only via loop device
-//! 4. Creates overlay: erofs (lower) + tmpfs (upper)
-//! 5. switch_root to overlay
-//! 6. OpenRC boots as PID 1
-//! ```
-//!
-//! # Implementation
-//!
-//! The actual EROFS building is done by `distro_builder::create_erofs`.
-//! This module provides AcornOS-specific orchestration (staging, atomicity).
+//! Uses Gentoo-style "work directory" pattern:
+//! - Build into `.work` files (rootfs-staging.work, filesystem.erofs.work)
+//! - Only swap to final locations after successful completion
+//! - If cancelled mid-build, existing artifacts are preserved
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use std::fs;
 use std::path::Path;
 
 use distro_builder::process;
+use distro_spec::acorn::verification;
 use distro_spec::acorn::{
     EROFS_CHUNK_SIZE, EROFS_COMPRESSION, EROFS_COMPRESSION_LEVEL, ROOTFS_NAME,
 };
@@ -62,17 +25,6 @@ use crate::component::{build_system, BuildContext};
 use distro_builder::alpine::extract::ExtractPaths;
 
 /// Build the EROFS rootfs using the component system.
-///
-/// This is the main entry point for building the AcornOS system image.
-/// It executes all components in phase order to build the staging directory,
-/// then creates an EROFS image from it.
-///
-/// # Flow
-///
-/// 1. Verify rootfs exists (Alpine packages from `extract`)
-/// 2. Create BuildContext pointing to rootfs and staging
-/// 3. Execute all components (FILESYSTEM, BUSYBOX, OPENRC, etc.)
-/// 4. Create EROFS from staging directory
 pub fn build_rootfs(base_dir: &Path) -> Result<()> {
     println!("=== Building AcornOS System Image (EROFS) ===\n");
 
@@ -80,8 +32,6 @@ pub fn build_rootfs(base_dir: &Path) -> Result<()> {
 
     let paths = ExtractPaths::new(base_dir);
     let output_dir = base_dir.join("output");
-    let staging = output_dir.join("rootfs-staging");
-    fs::create_dir_all(&output_dir)?;
 
     // Verify rootfs exists
     if !paths.rootfs.exists() || !paths.rootfs.join("bin").exists() {
@@ -92,44 +42,58 @@ pub fn build_rootfs(base_dir: &Path) -> Result<()> {
         );
     }
 
-    // Create build context
-    let ctx = BuildContext::new(base_dir, &staging, "acornos extract")?;
-
-    // Execute component system
-    build_system(&ctx)?;
-
-    // Work file pattern for atomic builds
+    // Gentoo-style: separate "work" vs "final" locations
+    let work_staging = output_dir.join("rootfs-staging.work");
     let work_output = output_dir.join("filesystem.erofs.work");
+    let final_staging = output_dir.join("rootfs-staging");
     let final_output = output_dir.join(ROOTFS_NAME);
 
-    // Clean work file if it exists
+    // Clean work directories only (preserve final)
+    let _ = fs::remove_dir_all(&work_staging);
     let _ = fs::remove_file(&work_output);
+    fs::create_dir_all(&work_staging)?;
 
-    // Build EROFS from staging
-    println!("\nCreating EROFS from staging...");
-    println!("  Source: {}", staging.display());
-    println!(
-        "  Compression: {} (level {})",
-        EROFS_COMPRESSION, EROFS_COMPRESSION_LEVEL
-    );
+    // Build into work directory (may fail — final is preserved)
+    let build_result = (|| -> Result<()> {
+        let ctx = BuildContext::new(base_dir, &work_staging, "acornos extract")?;
+        build_system(&ctx)?;
 
-    let result = distro_builder::create_erofs(
-        &staging,
-        &work_output,
-        EROFS_COMPRESSION,
-        EROFS_COMPRESSION_LEVEL,
-        EROFS_CHUNK_SIZE,
-    );
+        // Verify staging before creating EROFS
+        verify_staging(&work_staging)?;
 
-    // On failure, clean up work file
-    if let Err(e) = result {
+        // Build EROFS from staging
+        println!("\nCreating EROFS from staging...");
+        println!("  Source: {}", work_staging.display());
+        println!(
+            "  Compression: {} (level {})",
+            EROFS_COMPRESSION, EROFS_COMPRESSION_LEVEL
+        );
+
+        distro_builder::create_erofs(
+            &work_staging,
+            &work_output,
+            EROFS_COMPRESSION,
+            EROFS_COMPRESSION_LEVEL,
+            EROFS_CHUNK_SIZE,
+        )?;
+        Ok(())
+    })();
+
+    // On failure, clean up work files and propagate error
+    if let Err(e) = build_result {
+        let _ = fs::remove_dir_all(&work_staging);
         let _ = fs::remove_file(&work_output);
         return Err(e);
     }
 
-    // Atomic rename
+    // Atomic swap (only reached if build succeeded)
+    println!("\nSwapping work files to final locations...");
+    let _ = fs::remove_dir_all(&final_staging);
     let _ = fs::remove_file(&final_output);
-    fs::rename(&work_output, &final_output)?;
+    fs::rename(&work_staging, &final_staging)
+        .context("Failed to move rootfs-staging.work to rootfs-staging")?;
+    fs::rename(&work_output, &final_output)
+        .context("Failed to move filesystem.erofs.work to filesystem.erofs")?;
 
     println!("\n=== EROFS Build Complete ===");
     println!("  Output: {}", final_output.display());
@@ -138,6 +102,83 @@ pub fn build_rootfs(base_dir: &Path) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Verify the staging directory contains required files before creating EROFS.
+fn verify_staging(staging: &Path) -> Result<()> {
+    println!("\n  Verifying staging directory...");
+
+    let mut missing = Vec::new();
+    let mut passed = 0;
+
+    // Check required binaries
+    for bin in verification::REQUIRED_BINARIES {
+        if staging.join(bin).exists() {
+            passed += 1;
+        } else {
+            missing.push(*bin);
+        }
+    }
+
+    // Check FHS directories (may be real dirs or symlinks)
+    for dir in verification::REQUIRED_DIRS {
+        let p = staging.join(dir);
+        if p.exists() || p.is_symlink() {
+            passed += 1;
+        } else {
+            missing.push(*dir);
+        }
+    }
+
+    // Check config files
+    for cfg in verification::REQUIRED_CONFIGS {
+        if staging.join(cfg).exists() {
+            passed += 1;
+        } else {
+            missing.push(*cfg);
+        }
+    }
+
+    // Check init.d directory has services
+    let init_d = staging.join(verification::REQUIRED_SERVICE_DIR);
+    if init_d.is_dir()
+        && fs::read_dir(&init_d)
+            .map(|mut d| d.next().is_some())
+            .unwrap_or(false)
+    {
+        passed += 1;
+    } else {
+        missing.push(verification::REQUIRED_SERVICE_DIR);
+    }
+
+    // Check kernel modules directory is non-empty
+    let modules = staging.join(verification::KERNEL_MODULES_DIR);
+    if modules.is_dir()
+        && fs::read_dir(&modules)
+            .map(|mut d| d.next().is_some())
+            .unwrap_or(false)
+    {
+        passed += 1;
+    } else {
+        missing.push(verification::KERNEL_MODULES_DIR);
+    }
+
+    let total = passed + missing.len();
+
+    if missing.is_empty() {
+        println!("  ✓ Verification PASSED ({}/{} checks)", passed, total);
+        Ok(())
+    } else {
+        println!("  ✗ Verification FAILED ({}/{} checks)", passed, total);
+        for item in &missing {
+            println!("    ✗ {} - Missing", item);
+        }
+        bail!(
+            "Rootfs verification FAILED: {} missing files.\n\
+             The staging directory is incomplete and would produce a broken rootfs.",
+            missing.len()
+        );
+    }
 }
 
 /// Check that required host tools are available.

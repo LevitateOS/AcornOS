@@ -31,6 +31,8 @@ pub fn create_iso(base_dir: &Path) -> Result<()> {
     let initramfs = output_dir.join(INITRAMFS_LIVE_OUTPUT);
     let rootfs = output_dir.join(ROOTFS_NAME);
     let label = env::var("ISO_LABEL").unwrap_or_else(|_| ISO_LABEL.to_string());
+    let iso_output = output_dir.join(ISO_FILENAME);
+    let iso_tmp = output_dir.join(format!("{}.tmp", ISO_FILENAME));
 
     println!("=== Building AcornOS ISO ===\n");
 
@@ -57,16 +59,10 @@ pub fn create_iso(base_dir: &Path) -> Result<()> {
     // Create live overlay
     create_live_overlay(&output_dir)?;
 
-    // Build reciso config — systemd-boot + UKIs
-    let mut config = reciso::IsoConfig::new(
-        &kernel,
-        &initramfs,
-        &rootfs,
-        &label,
-        output_dir.join(ISO_FILENAME),
-    )
-    .with_os_release(OS_NAME, OS_ID, OS_VERSION)
-    .with_overlay(output_dir.join("live-overlay"));
+    // Build reciso config — systemd-boot + UKIs (write to .tmp for atomicity)
+    let mut config = reciso::IsoConfig::new(&kernel, &initramfs, &rootfs, &label, &iso_tmp)
+        .with_os_release(OS_NAME, OS_ID, OS_VERSION)
+        .with_overlay(output_dir.join("live-overlay"));
 
     // Add UKI entries from distro-spec
     for entry in UKI_ENTRIES {
@@ -79,8 +75,70 @@ pub fn create_iso(base_dir: &Path) -> Result<()> {
 
     reciso::create_iso(&config)?;
 
-    print_iso_summary(&output_dir.join(ISO_FILENAME));
+    // Atomic rename to final destination
+    fs::rename(&iso_tmp, &iso_output)?;
+
+    // Verify ISO contents
+    verify_iso(&iso_output)?;
+
+    print_iso_summary(&iso_output);
     Ok(())
+}
+
+/// Verify ISO contains required boot components.
+fn verify_iso(path: &Path) -> Result<()> {
+    use fsdbg::iso::IsoReader;
+
+    print!("  Verifying ISO... ");
+
+    let reader = match IsoReader::open(path) {
+        Ok(r) => r,
+        Err(e) => {
+            let err_str = e.to_string();
+            if err_str.contains("isoinfo not found") || err_str.contains("isoinfo") {
+                println!("SKIPPED (isoinfo not available)");
+                return Ok(());
+            }
+            println!("FAILED");
+            bail!("Failed to open ISO: {}", e);
+        }
+    };
+
+    let required = [
+        "/EFI/BOOT/BOOTX64.EFI",
+        "/live/filesystem.erofs",
+        "/live/overlay",
+    ];
+
+    let mut missing = Vec::new();
+    for item in &required {
+        if !reader.exists(item) {
+            missing.push(*item);
+        }
+    }
+
+    // Check at least one UKI exists in EFI/Linux/
+    let has_uki = reader
+        .entries()
+        .iter()
+        .any(|e| e.path.starts_with("/EFI/Linux/") && e.path.ends_with(".efi"));
+    if !has_uki {
+        missing.push("EFI/Linux/*.efi (no UKI found)");
+    }
+
+    if missing.is_empty() {
+        println!("OK");
+        Ok(())
+    } else {
+        println!("FAILED");
+        for item in &missing {
+            println!("    ✗ {} - Missing", item);
+        }
+        bail!(
+            "ISO verification failed: {} items missing. The ISO will not boot correctly.",
+            missing.len()
+        );
+    }
 }
 
 /// Create live overlay using shared infrastructure.

@@ -17,7 +17,7 @@
 //! 4. OpenRC (PID 1) takes over
 //! ```
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 use std::path::Path;
 
 use distro_spec::acorn::{
@@ -38,11 +38,13 @@ pub fn build_tiny_initramfs(base_dir: &Path) -> Result<()> {
     let modules_base = base_dir.join("output/staging/lib/modules");
     let modules_dir = find_kernel_modules_dir(&modules_base)?;
 
+    let output_path = output_dir.join(INITRAMFS_LIVE_OUTPUT);
+
     let config = TinyConfig {
         modules_dir,
         busybox_path,
         template_path: base_dir.join("profile/init_tiny.template"),
-        output: output_dir.join(INITRAMFS_LIVE_OUTPUT),
+        output: output_path.clone(),
         iso_label: ISO_LABEL.to_string(),
         rootfs_path: ROOTFS_ISO_PATH.to_string(),
         live_overlay_path: Some(LIVE_OVERLAY_ISO_PATH.to_string()),
@@ -56,5 +58,56 @@ pub fn build_tiny_initramfs(base_dir: &Path) -> Result<()> {
         extra_template_vars: Vec::new(),
     };
 
-    recinit::build_tiny_initramfs(&config, true)
+    recinit::build_tiny_initramfs(&config, true)?;
+
+    // Verify the built initramfs
+    verify_initramfs(&output_path)?;
+
+    Ok(())
+}
+
+/// Verify the initramfs contains essential files.
+fn verify_initramfs(path: &Path) -> Result<()> {
+    use fsdbg::cpio::CpioReader;
+
+    print!("  Verifying initramfs... ");
+
+    let reader = CpioReader::open(path)
+        .map_err(|e| anyhow::anyhow!("Failed to open initramfs for verification: {}", e))?;
+
+    let mut missing = Vec::new();
+
+    // Must have /init
+    if !reader.exists("init") {
+        missing.push("/init");
+    }
+
+    // Must have busybox
+    if !reader.exists("bin/busybox") {
+        missing.push("/bin/busybox");
+    }
+
+    // Must have at least one kernel module (.ko or .ko.zst)
+    let has_modules = reader.entries().iter().any(|e| {
+        e.path.starts_with("lib/modules/")
+            && (e.path.ends_with(".ko") || e.path.ends_with(".ko.zst"))
+    });
+    if !has_modules {
+        missing.push("lib/modules/**/*.ko (no kernel modules)");
+    }
+
+    if missing.is_empty() {
+        println!("OK");
+        Ok(())
+    } else {
+        println!("FAILED");
+        for item in &missing {
+            println!("    ✗ {} - Missing", item);
+        }
+        bail!(
+            "Initramfs verification FAILED: {} missing items.\n\
+             The initramfs is incomplete and will not boot correctly.",
+            missing.len()
+        );
+    }
 }
