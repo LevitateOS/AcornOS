@@ -1,12 +1,14 @@
 # =============================================================================
 # AcornOS Kernel Configuration
 #
-# Goals: Desktop that works on any hardware AND never needs rebooting
+# Philosophy: "Instant response. Feel the speed."
+# - Snappy desktop that reacts immediately to user input
+# - Full preemption — never wait for the kernel to finish its work
+# - 1000Hz timer — sub-millisecond scheduling granularity
 # - Comprehensive hardware support (plug in anything, it works)
-# - Rock-solid stability (uptime measured in months)
 #
-# Note: AcornOS uses OpenRC instead of systemd, but we keep the cgroup/namespace
-# options enabled for container support and general compatibility.
+# AcornOS uses OpenRC (not systemd), but keeps cgroup/namespace support
+# for containers and general compatibility.
 # =============================================================================
 
 CONFIG_LOCALVERSION="-acorn"
@@ -18,7 +20,9 @@ CONFIG_NR_CPUS=256
 CONFIG_SCHED_MC=y
 CONFIG_SCHED_SMT=y
 CONFIG_SCHED_CLASS_EXT=y
-CONFIG_PREEMPT_VOLUNTARY=y
+# Full preemption: kernel can be preempted almost anywhere.
+# Higher throughput cost (~2-3%) but dramatically lower latency.
+CONFIG_PREEMPT=y
 CONFIG_X86_X2APIC=y
 CONFIG_X86_TSC=y
 CONFIG_X86_MSR=y
@@ -38,17 +42,19 @@ CONFIG_SPI=y
 CONFIG_BLK_DEV_INITRD=y
 CONFIG_INITRAMFS_COMPRESSION_GZIP=y
 
-# === MEMORY (24GB+ systems, unused RAM is wasted RAM) ===
+# === MEMORY (snappy under pressure) ===
 CONFIG_TRANSPARENT_HUGEPAGE=y
 CONFIG_TRANSPARENT_HUGEPAGE_MADVISE=y
 CONFIG_KSM=y
 CONFIG_ZSMALLOC=y
+CONFIG_ZRAM=y
+CONFIG_ZRAM_DEF_COMP_ZSTD=y
 CONFIG_MEMORY_HOTPLUG=y
 CONFIG_SPARSEMEM_VMEMMAP=y
 CONFIG_LRU_GEN=y
 CONFIG_LRU_GEN_ENABLED=y
 
-# === SYSTEMD REQUIREMENTS ===
+# === CGROUPS / NAMESPACES (container support) ===
 CONFIG_DEVTMPFS=y
 CONFIG_DEVTMPFS_MOUNT=y
 CONFIG_TMPFS=y
@@ -86,18 +92,15 @@ CONFIG_AUTOFS_FS=y
 CONFIG_DMIID=y
 CONFIG_SECCOMP=y
 CONFIG_SECCOMP_FILTER=y
-CONFIG_CHECKPOINT_RESTORE=y
 CONFIG_SCHED_AUTOGROUP=y
 
 # === MODULES ===
 CONFIG_MODULES=y
 CONFIG_MODULE_UNLOAD=y
-CONFIG_MODULE_FORCE_UNLOAD=y
 CONFIG_MODVERSIONS=y
 CONFIG_MODULE_COMPRESS_ZSTD=y
-CONFIG_LIVEPATCH=y
 
-# === BLOCK LAYER (modern I/O) ===
+# === BLOCK LAYER (low-latency I/O) ===
 CONFIG_BLOCK=y
 CONFIG_BLK_MQ_VIRTIO=y
 CONFIG_BLK_MQ_PCI=y
@@ -108,6 +111,7 @@ CONFIG_BLK_DEV_THROTTLING=y
 CONFIG_BLK_WBT=y
 CONFIG_BLK_WBT_MQ=y
 CONFIG_BLK_SED_OPAL=y
+# BFQ for rotational, Kyber for NVMe — both available, kyber preferred
 CONFIG_IOSCHED_BFQ=y
 CONFIG_BFQ_GROUP_IOSCHED=y
 CONFIG_MQ_IOSCHED_DEADLINE=y
@@ -196,8 +200,6 @@ CONFIG_SQUASHFS_XZ=y
 CONFIG_SQUASHFS_ZSTD=y
 
 # === EROFS (modern read-only filesystem for live media) ===
-# EROFS is used by Fedora 42+, RHEL 10, Android for better read performance
-# AcornOS uses lz4hc compression for EROFS
 CONFIG_EROFS_FS=y
 CONFIG_EROFS_FS_XATTR=y
 CONFIG_EROFS_FS_POSIX_ACL=y
@@ -309,7 +311,6 @@ CONFIG_WLAN=y
 CONFIG_WLAN_VENDOR_INTEL=y
 CONFIG_IWLWIFI=m
 CONFIG_IWLMVM=m
-CONFIG_IWLWIFI_DEBUG=y
 CONFIG_WLAN_VENDOR_ATH=y
 CONFIG_ATH_COMMON=m
 CONFIG_ATH9K=m
@@ -631,14 +632,14 @@ CONFIG_BPF_JIT=y
 CONFIG_BPF_JIT_DEFAULT_ON=y
 CONFIG_IO_URING=y
 
-# === PERFORMANCE ===
-# HZ=250: Good desktop responsiveness without 1000Hz overhead
-# (1000Hz adds ~1% CPU overhead and more jitter under load)
+# === PERFORMANCE (snappy desktop) ===
+# HZ=1000: Lowest scheduling latency. Yes, ~1% more CPU overhead than 250Hz.
+# Worth it — every click, every keypress, every frame feels faster.
 CONFIG_HIGH_RES_TIMERS=y
 CONFIG_NO_HZ_COMMON=y
-CONFIG_NO_HZ_IDLE=y
-CONFIG_HZ_250=y
-CONFIG_HZ=250
+CONFIG_NO_HZ_FULL=y
+CONFIG_HZ_1000=y
+CONFIG_HZ=1000
 CONFIG_PERF_EVENTS=y
 CONFIG_PERF_EVENTS_INTEL_UNCORE=y
 CONFIG_PERF_EVENTS_INTEL_CSTATE=y
@@ -646,13 +647,12 @@ CONFIG_PERF_EVENTS_AMD_POWER=y
 CONFIG_PERF_EVENTS_AMD_UNCORE=y
 CONFIG_FTRACE=y
 
-# === STABILITY (for long uptime) ===
+# === STABILITY (keep the watchdogs, shorter leash) ===
 CONFIG_SOFTLOCKUP_DETECTOR=y
 CONFIG_HARDLOCKUP_DETECTOR=y
 CONFIG_DETECT_HUNG_TASK=y
-CONFIG_DEFAULT_HUNG_TASK_TIMEOUT=120
+CONFIG_DEFAULT_HUNG_TASK_TIMEOUT=60
 CONFIG_WQ_WATCHDOG=y
-CONFIG_SCHED_DEBUG=y
 CONFIG_COMPACTION=y
 CONFIG_MEMORY_FAILURE=y
 CONFIG_HWPOISON_INJECT=m
@@ -688,8 +688,6 @@ CONFIG_SP5100_TCO=m
 
 # === ECC / EDAC ===
 CONFIG_EDAC=y
-CONFIG_EDAC_MM_EDAC=m
-CONFIG_EDAC_DECODE_MCE=m
 CONFIG_EDAC_GHES=y
 CONFIG_EDAC_AMD64=m
 CONFIG_EDAC_SKYLAKE=m
