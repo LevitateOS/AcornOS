@@ -14,8 +14,7 @@
 //! assert_eq!(config.default_shell(), "/bin/ash");
 //! ```
 
-use distro_builder::build::context::{DistroConfig, InitSystem};
-use distro_builder::KernelInstallConfig;
+use distro_contract::{DistroConfig, InitSystem, KernelInstallConfig};
 
 /// AcornOS distribution configuration.
 ///
