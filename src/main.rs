@@ -62,6 +62,14 @@ enum Commands {
     Build {
         #[command(subcommand)]
         artifact: Option<BuildArtifact>,
+
+        /// Build the kernel from source (~1 hour). Requires --dangerously-waste-the-users-time.
+        #[arg(long)]
+        kernel: bool,
+
+        /// Confirm that you really want to spend ~1 hour building the kernel.
+        #[arg(long)]
+        dangerously_waste_the_users_time: bool,
     },
 
     /// Rebuild only the initramfs
@@ -121,11 +129,28 @@ fn main() {
             Some(DownloadTarget::Tools) => cmd_download_tools(),
             Some(DownloadTarget::All) | None => cmd_download_all(),
         },
-        Commands::Build { artifact } => match artifact {
-            Some(BuildArtifact::Kernel { clean }) => cmd_build_kernel(clean),
-            Some(BuildArtifact::Rootfs) => cmd_build_rootfs(),
-            None => cmd_build(),
-        },
+        Commands::Build { artifact, kernel, dangerously_waste_the_users_time } => {
+            use distro_contract::kernel::{KernelBuildGuard, KernelGuard};
+            match artifact {
+                Some(BuildArtifact::Kernel { clean }) => {
+                    KernelGuard::new(true, dangerously_waste_the_users_time,
+                        "cargo run -- build kernel --dangerously-waste-the-users-time",
+                    ).require_kernel_confirmation();
+                    cmd_build_kernel(clean)
+                }
+                Some(BuildArtifact::Rootfs) => cmd_build_rootfs(),
+                None => {
+                    if kernel {
+                        KernelGuard::new(true, dangerously_waste_the_users_time,
+                            "cargo run -- build --kernel --dangerously-waste-the-users-time",
+                        ).require_kernel_confirmation();
+                        cmd_build_with_kernel()
+                    } else {
+                        cmd_build()
+                    }
+                }
+            }
+        }
         Commands::Initramfs => cmd_initramfs(),
         Commands::Iso => cmd_iso(),
         Commands::Run => cmd_run(),
@@ -140,54 +165,45 @@ fn main() {
     }
 }
 
+/// Resolve kernel via recipe: handles download, theft from leviso, build, and install.
+/// Returns Ok if kernel is available in staging after this call.
+fn resolve_kernel(base_dir: &std::path::Path) -> Result<()> {
+    let vmlinuz = base_dir.join("output/staging/boot/vmlinuz");
+    if vmlinuz.exists() {
+        println!("[SKIP] Kernel already built and installed");
+        return Ok(());
+    }
+
+    // Run the recipe — it handles theft from leviso internally
+    println!("Resolving kernel via recipe...");
+    let linux = distro_builder::recipe::linux::linux(base_dir, &distro_spec::acorn::KERNEL_SOURCE)?;
+
+    if !linux.vmlinuz.exists() {
+        anyhow::bail!(
+            "No kernel available!\n\n\
+             Options:\n\
+             1. Build LevitateOS first (leviso build) — AcornOS can steal its kernel\n\
+             2. Build AcornOS kernel:  cargo run -- build --kernel --dangerously-waste-the-users-time\n\
+             3. Build kernel only:     cargo run -- build kernel --dangerously-waste-the-users-time\n\n\
+             Kernel source will be downloaded automatically from cdn.kernel.org (v{}).",
+            distro_spec::acorn::KERNEL_SOURCE.version
+        );
+    }
+
+    Ok(())
+}
+
 fn cmd_build() -> Result<()> {
     use distro_builder::alpine::timing::Timer;
     use std::time::Instant;
 
-    // Full build: kernel + EROFS + initramfs + ISO
-    // Skips anything already built, rebuilds only on changes.
     let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let workspace_root = base_dir.parent().expect("AcornOS must be in workspace");
-    let linux_source = workspace_root.join("linux");
     let build_start = Instant::now();
 
     println!("=== Full AcornOS Build ===\n");
 
-    // 1. Build kernel (skip if inputs unchanged)
-    let needs_compile = acornos::rebuild::kernel_needs_compile(&base_dir);
-    let needs_install = acornos::rebuild::kernel_needs_install(&base_dir);
-    let output_dir = base_dir.join("output");
-
-    if needs_compile {
-        if !linux_source.exists() || !linux_source.join("Makefile").exists() {
-            anyhow::bail!(
-                "Linux kernel source not found at {}\n\
-                 Run: git submodule update --init linux",
-                linux_source.display()
-            );
-        }
-        println!("Building kernel...");
-        let t = Timer::start("Kernel");
-        acornos::build::kernel::build_kernel(&linux_source, &output_dir, &base_dir)?;
-        acornos::build::kernel::install_kernel(
-            &linux_source,
-            &output_dir,
-            &output_dir.join("staging"),
-        )?;
-        acornos::rebuild::cache_kernel_hash(&base_dir);
-        t.finish();
-    } else if needs_install {
-        println!("Installing kernel (compile skipped)...");
-        let t = Timer::start("Kernel install");
-        acornos::build::kernel::install_kernel(
-            &linux_source,
-            &output_dir,
-            &output_dir.join("staging"),
-        )?;
-        t.finish();
-    } else {
-        println!("[SKIP] Kernel already built and installed");
-    }
+    // 1. Resolve kernel (use existing or steal — never build without explicit flag)
+    resolve_kernel(&base_dir)?;
 
     // 2. Build EROFS rootfs (skip if inputs unchanged)
     if acornos::rebuild::rootfs_needs_rebuild(&base_dir) {
@@ -233,64 +249,95 @@ fn cmd_build() -> Result<()> {
     Ok(())
 }
 
+fn cmd_build_with_kernel() -> Result<()> {
+    use distro_builder::alpine::timing::Timer;
+    use std::time::Instant;
+
+    let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let build_start = Instant::now();
+
+    println!("=== Full AcornOS Build (with kernel) ===\n");
+
+    // Build kernel via recipe (handles download + build + install)
+    let needs_compile = acornos::rebuild::kernel_needs_compile(&base_dir);
+    if needs_compile {
+        println!("Building kernel from source (~1 hour)...");
+        let t = Timer::start("Kernel");
+        distro_builder::recipe::linux::linux(&base_dir, &distro_spec::acorn::KERNEL_SOURCE)?;
+        acornos::rebuild::cache_kernel_hash(&base_dir);
+        t.finish();
+    } else {
+        println!("[SKIP] Kernel already built and installed");
+    }
+
+    // Continue with rest of build
+    if acornos::rebuild::rootfs_needs_rebuild(&base_dir) {
+        println!("\nBuilding EROFS system image...");
+        let t = Timer::start("EROFS");
+        acornos::artifact::build_rootfs(&base_dir)?;
+        acornos::rebuild::cache_rootfs_hash(&base_dir);
+        t.finish();
+    } else {
+        println!("\n[SKIP] EROFS rootfs already built (inputs unchanged)");
+    }
+
+    if acornos::rebuild::initramfs_needs_rebuild(&base_dir) {
+        println!("\nBuilding tiny initramfs...");
+        let t = Timer::start("Initramfs");
+        acornos::artifact::build_tiny_initramfs(&base_dir)?;
+        acornos::rebuild::cache_initramfs_hash(&base_dir);
+        t.finish();
+    } else {
+        println!("\n[SKIP] Initramfs already built (inputs unchanged)");
+    }
+
+    if acornos::rebuild::iso_needs_rebuild(&base_dir) {
+        println!("\nBuilding ISO...");
+        let t = Timer::start("ISO");
+        acornos::artifact::create_iso(&base_dir)?;
+        t.finish();
+    } else {
+        println!("\n[SKIP] ISO already built (components unchanged)");
+    }
+
+    let total = build_start.elapsed().as_secs_f64();
+    if total >= 60.0 {
+        println!("\n=== Build Complete ({:.1}m) ===", total / 60.0);
+    } else {
+        println!("\n=== Build Complete ({:.1}s) ===", total);
+    }
+    println!("  ISO: output/acornos.iso");
+    println!("\nNext: acornos run");
+
+    Ok(())
+}
+
 fn cmd_build_kernel(clean: bool) -> Result<()> {
     use distro_builder::alpine::timing::Timer;
 
     let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    // Linux kernel source is at the workspace root (shared with leviso)
-    let workspace_root = base_dir.parent().expect("AcornOS must be in workspace");
-    let linux_source = workspace_root.join("linux");
 
-    if !linux_source.exists() || !linux_source.join("Makefile").exists() {
-        anyhow::bail!(
-            "Linux kernel source not found at {}\n\
-             Run: git submodule update --init linux",
-            linux_source.display()
-        );
+    if clean {
+        let kernel_build = base_dir.join("output/kernel-build");
+        if kernel_build.exists() {
+            println!("Cleaning kernel build directory...");
+            std::fs::remove_dir_all(&kernel_build)?;
+        }
     }
 
-    let output_dir = base_dir.join("output");
     let needs_compile = clean || acornos::rebuild::kernel_needs_compile(&base_dir);
     let needs_install = acornos::rebuild::kernel_needs_install(&base_dir);
 
-    if needs_compile {
-        if clean {
-            let kernel_build = output_dir.join("kernel-build");
-            if kernel_build.exists() {
-                println!("Cleaning kernel build directory...");
-                std::fs::remove_dir_all(&kernel_build)?;
-            }
-        }
-
-        println!("Building kernel...");
+    if needs_compile || needs_install {
+        println!("Building kernel via recipe...");
         let t = Timer::start("Kernel");
-        let version = acornos::build::kernel::build_kernel(&linux_source, &output_dir, &base_dir)?;
-        acornos::build::kernel::install_kernel(
-            &linux_source,
-            &output_dir,
-            &output_dir.join("staging"),
-        )?;
+        let linux = distro_builder::recipe::linux::linux(&base_dir, &distro_spec::acorn::KERNEL_SOURCE)?;
         acornos::rebuild::cache_kernel_hash(&base_dir);
         t.finish();
 
         println!("\n=== Kernel build complete ===");
-        println!("  Version: {}", version);
+        println!("  Version: {}", linux.version);
         println!("  Kernel:  output/staging/boot/vmlinuz");
-        println!("  Modules: output/staging/lib/modules/{}/", version);
-    } else if needs_install {
-        println!("Installing kernel (compile skipped)...");
-        let t = Timer::start("Kernel install");
-        let version = acornos::build::kernel::install_kernel(
-            &linux_source,
-            &output_dir,
-            &output_dir.join("staging"),
-        )?;
-        t.finish();
-
-        println!("\n=== Kernel install complete ===");
-        println!("  Version: {}", version);
-        println!("  Kernel:  output/staging/boot/vmlinuz");
-        println!("  Modules: output/staging/lib/modules/{}/", version);
     } else {
         println!("[SKIP] Kernel already built and installed");
         println!("  Use 'build kernel --clean' to force rebuild");
@@ -404,8 +451,8 @@ fn cmd_download_all() -> Result<()> {
     )?;
     println!("Alpine:  {} [OK]", alpine.iso.display());
 
-    // Linux kernel
-    let linux = distro_builder::recipe::linux::linux(&base_dir)?;
+    // Linux kernel (via recipe)
+    let linux = distro_builder::recipe::linux::linux(&base_dir, &distro_spec::acorn::KERNEL_SOURCE)?;
     println!("Linux:   {} [OK]", linux.source.display());
 
     // Installation tools
@@ -437,16 +484,15 @@ fn cmd_download_alpine() -> Result<()> {
 
 fn cmd_download_linux() -> Result<()> {
     let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let linux = distro_builder::recipe::linux::linux(&base_dir)?;
+    let source = &distro_spec::acorn::KERNEL_SOURCE;
 
-    println!("Linux kernel:");
+    println!("Linux kernel (AcornOS target: {} mainline):", source.version);
+
+    let linux = distro_builder::recipe::linux::linux(&base_dir, source)?;
     println!("  Source:      {}", linux.source.display());
-    if linux.is_installed() {
-        println!(
-            "  Installed:   {} (kernel {})",
-            linux.vmlinuz.display(),
-            linux.version
-        );
+
+    if linux.vmlinuz.exists() {
+        println!("  Installed:   {}", linux.vmlinuz.display());
     } else {
         println!("  Kernel:      NOT INSTALLED YET");
     }
@@ -482,7 +528,7 @@ fn cmd_download_tools() -> Result<()> {
 fn cmd_status() -> Result<()> {
     use acornos::config::AcornConfig;
     use distro_builder::alpine::extract::ExtractPaths;
-    use distro_builder::DistroConfig;
+    use distro_contract::DistroConfig;
 
     let config = AcornConfig;
     let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -521,13 +567,13 @@ fn cmd_status() -> Result<()> {
     println!();
 
     // Check Linux kernel source
-    let workspace_root = base_dir.parent().expect("AcornOS must be in workspace");
-    let linux_source = workspace_root.join("linux");
-    println!("Kernel Source:");
-    if linux_source.exists() && linux_source.join("Makefile").exists() {
-        println!("  Linux source:    FOUND at {}", linux_source.display());
+    let kernel_spec = &distro_spec::acorn::KERNEL_SOURCE;
+    let tarball_source = base_dir.join("downloads").join(kernel_spec.source_dir_name());
+    println!("Kernel Source (v{}):", kernel_spec.version);
+    if tarball_source.join("Makefile").exists() {
+        println!("  Linux source:    FOUND at {}", tarball_source.display());
     } else {
-        println!("  Linux source:    NOT FOUND (run 'git submodule update --init linux')");
+        println!("  Linux source:    NOT DOWNLOADED (will fetch from cdn.kernel.org)");
     }
     let kconfig = base_dir.join("kconfig");
     if kconfig.exists() {
@@ -537,6 +583,7 @@ fn cmd_status() -> Result<()> {
     }
 
     // Check if we can steal kernel from LevitateOS
+    let workspace_root = base_dir.parent().expect("AcornOS must be in workspace");
     let leviso_bzimage = workspace_root.join("leviso/output/kernel-build/arch/x86/boot/bzImage");
     if leviso_bzimage.exists() {
         println!("  LevitateOS:      KERNEL AVAILABLE (can steal instead of building)");
@@ -593,9 +640,7 @@ fn cmd_status() -> Result<()> {
     println!();
 
     println!("Next steps:");
-    if !linux_source.exists() {
-        println!("  1. Run 'git submodule update --init linux' to get kernel source");
-    } else if !paths.rootfs.exists() {
+    if !paths.rootfs.exists() {
         println!("  1. Run 'acornos download alpine' to download and create rootfs");
     } else if !kernel.exists() {
         println!("  1. Run 'acornos build kernel' to build the kernel");
