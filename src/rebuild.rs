@@ -3,16 +3,8 @@
 //! Uses hash-based caching to skip rebuilding artifacts that haven't changed.
 //! This provides faster incremental builds by detecting when inputs change.
 //!
-//! # ============================================================================
-//! # KERNEL THEFT MODE
-//! # ============================================================================
-//! #
-//! # The kernel rebuild detection is aware of "theft mode" - if LevitateOS has
-//! # already built a kernel, we can steal it instead of building our own.
-//! #
-//! # See `src/build/kernel.rs` for details on kernel theft.
-//! #
-//! # ============================================================================
+//! Kernel theft from LevitateOS is handled by the recipe system (deps/linux.rhai),
+//! not by the rebuild detection logic.
 
 use std::path::Path;
 
@@ -22,54 +14,26 @@ use distro_builder::cache;
 
 /// Check if kernel needs to be compiled.
 ///
-/// # THEFT MODE
-///
-/// This function returns `false` (no compile needed) if:
-/// 1. AcornOS already has a kernel build, OR
-/// 2. LevitateOS has a kernel build we can steal
-///
-/// The actual theft (symlinking) happens in `build_kernel()`.
+/// Checks if the kernel build artifacts exist and if inputs (kconfig) have changed.
+/// Theft from LevitateOS is handled by the recipe system, not here.
 pub fn kernel_needs_compile(base_dir: &Path) -> bool {
-    // First check: do we already have a kernel (possibly stolen/symlinked)?
     let our_bzimage = base_dir.join("output/kernel-build/arch/x86/boot/bzImage");
-    if our_bzimage.exists() {
-        // We have something - check if inputs changed
-        let kconfig = base_dir.join("kconfig");
-        let workspace_root = base_dir.parent().expect("AcornOS must be in workspace");
-        let kernel_makefile = workspace_root.join("linux/Makefile");
-        let hash_file = base_dir.join("output/.kernel-inputs.hash");
-
-        let inputs: Vec<&Path> = if kernel_makefile.exists() {
-            vec![&kconfig, &kernel_makefile]
-        } else {
-            vec![&kconfig]
-        };
-
-        let current_hash = match cache::hash_files(&inputs) {
-            Some(h) => h,
-            None => return true,
-        };
-
-        return cache::needs_rebuild(&current_hash, &hash_file, &our_bzimage);
+    if !our_bzimage.exists() {
+        return true;
     }
 
-    // ========================================================================
-    // THEFT CHECK: Can we steal from LevitateOS?
-    // ========================================================================
-    // If leviso has a built kernel, we don't need to compile - we'll steal it.
-    // The actual theft happens in build_kernel(), we just need to signal
-    // "no compile needed" here so the build flow handles it correctly.
-    let workspace_root = base_dir.parent().expect("AcornOS must be in workspace");
-    let leviso_bzimage = workspace_root.join("leviso/output/kernel-build/arch/x86/boot/bzImage");
+    // Check if inputs changed (kconfig)
+    let kconfig = base_dir.join("kconfig");
+    let hash_file = base_dir.join("output/.kernel-inputs.hash");
 
-    if leviso_bzimage.exists() {
-        // LevitateOS has a kernel we can steal - no compile needed!
-        // (but we still need to "build" to create the symlink)
-        return true; // Return true so build_kernel() runs and creates symlink
-    }
+    let inputs: Vec<&Path> = vec![&kconfig];
 
-    // No kernel available anywhere - need to compile
-    true
+    let current_hash = match cache::hash_files(&inputs) {
+        Some(h) => h,
+        None => return true,
+    };
+
+    cache::needs_rebuild(&current_hash, &hash_file, &our_bzimage)
 }
 
 /// Check if kernel needs to be installed (bzImage exists but vmlinuz doesn't).
@@ -92,8 +56,10 @@ pub fn kernel_needs_install(base_dir: &Path) -> bool {
 /// Cache the kernel input hash after a successful build.
 pub fn cache_kernel_hash(base_dir: &Path) {
     let kconfig = base_dir.join("kconfig");
-    let workspace_root = base_dir.parent().expect("AcornOS must be in workspace");
-    let kernel_makefile = workspace_root.join("linux/Makefile");
+    let kernel_source_dir = base_dir.join("downloads").join(
+        distro_spec::acorn::KERNEL_SOURCE.source_dir_name()
+    );
+    let kernel_makefile = kernel_source_dir.join("Makefile");
 
     let inputs: Vec<&Path> = if kernel_makefile.exists() {
         vec![&kconfig, &kernel_makefile]
