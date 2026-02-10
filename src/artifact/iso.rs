@@ -5,7 +5,7 @@
 //! - EROFS image (~200MB) - complete base system
 //! - Live overlay - live-specific configs (autologin, serial console, empty root password)
 
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -15,6 +15,9 @@ use distro_builder::artifact::filesystem::{atomic_move, copy_dir_recursive};
 use distro_builder::artifact::iso_utils::{
     create_efi_dirs_in_fat, create_fat16_image, generate_iso_checksum, mcopy_to_fat, run_xorriso,
     setup_iso_structure,
+};
+use distro_builder::artifact::live_overlay::{
+    create_openrc_live_overlay, InittabVariant, LiveOverlayConfig,
 };
 use distro_builder::process::Cmd;
 use distro_spec::acorn::{
@@ -169,263 +172,22 @@ fn validate_iso_inputs(paths: &IsoPaths) -> Result<()> {
     Ok(())
 }
 
-/// Create live overlay with autologin and empty root password.
+/// Create live overlay using shared infrastructure.
 fn create_live_overlay(output_dir: &Path) -> Result<()> {
-    println!("Creating live overlay...");
-
-    let live_overlay = output_dir.join("live-overlay");
-
-    // Clean previous
-    if live_overlay.exists() {
-        fs::remove_dir_all(&live_overlay)?;
-    }
-
-    // =========================================================================
-    // STEP 1: Copy profile/live-overlay (test instrumentation, etc.)
-    // =========================================================================
-    // This copies files from AcornOS/profile/live-overlay/ which includes:
-    // - Test instrumentation (etc/profile.d/00-acorn-test.sh)
-    // These are copied FIRST so code-generated files below can override if needed.
     let base_dir = output_dir.parent().unwrap_or(Path::new("."));
     let profile_overlay = base_dir.join("profile/live-overlay");
-    if profile_overlay.exists() {
-        println!("  Copying profile/live-overlay (test instrumentation)...");
-        copy_dir_recursive(&profile_overlay, &live_overlay).with_context(|| {
-            format!(
-                "Failed to copy {} -> {}",
-                profile_overlay.display(),
-                live_overlay.display()
-            )
-        })?;
-    }
 
-    // =========================================================================
-    // STEP 2: Code-generated overlay files (may override profile defaults)
-    // =========================================================================
+    let config = LiveOverlayConfig {
+        os_name: OS_NAME,
+        inittab: InittabVariant::DesktopWithSerial,
+        profile_overlay: if profile_overlay.exists() {
+            Some(profile_overlay.as_path())
+        } else {
+            None
+        },
+    };
 
-    // Create directory structure
-    fs::create_dir_all(live_overlay.join("etc")).with_context(|| "Failed to create etc")?;
-
-    // Create autologin script for serial console
-    // This script is called by agetty -l to act as a login program replacement
-    // agetty sets up the tty, this just needs to spawn a login shell
-    fs::create_dir_all(live_overlay.join("usr/local/bin"))?;
-    let autologin_script = r#"#!/bin/sh
-# Autologin for serial console testing
-# Called by agetty -l as the login program
-# agetty has already set up stdin/stdout/stderr on the tty
-
-echo "[autologin] Starting login shell..."
-
-# Run sh as login shell (sources /etc/profile and /etc/profile.d/*)
-# In Alpine, /bin/sh is busybox ash
-exec /bin/sh -l
-"#;
-    let autologin_path = live_overlay.join("usr/local/bin/serial-autologin");
-    fs::write(&autologin_path, autologin_script)?;
-    let mut perms = fs::metadata(&autologin_path)?.permissions();
-    perms.set_mode(0o755);
-    fs::set_permissions(&autologin_path, perms)?;
-
-    // Create /etc/issue for live boot identification
-    fs::write(
-        live_overlay.join("etc/issue"),
-        "\nAcornOS Live - \\l\n\nLogin as 'root' (no password)\n\n",
-    )?;
-
-    // Create empty root password (allow passwordless login)
-    // This is applied ONLY during live boot via overlay
-    // The EROFS base system has a locked root password
-    let shadow_content = "root::0:0:99999:7:::\n\
-                          bin:!:0:0:99999:7:::\n\
-                          daemon:!:0:0:99999:7:::\n\
-                          nobody:!:0:0:99999:7:::\n";
-    fs::write(live_overlay.join("etc/shadow"), shadow_content)?;
-
-    // Set proper permissions on shadow (read-only by root)
-    use std::os::unix::fs::PermissionsExt;
-    let mut perms = fs::metadata(live_overlay.join("etc/shadow"))?.permissions();
-    perms.set_mode(0o640);
-    fs::set_permissions(live_overlay.join("etc/shadow"), perms)?;
-
-    // Enable serial console for automated testing
-    // Create /etc/inittab with serial getty ENABLED
-    // This overlays the base inittab from EROFS (which has serial commented out)
-    //
-    // For autologin on serial, we use agetty --autologin which:
-    // - Automatically logs in the specified user (root)
-    // - Spawns a login shell which sources /etc/profile and /etc/profile.d/*
-    // - This is the standard Alpine Linux approach (see wiki.alpinelinux.org/wiki/TTY_Autologin)
-    // Serial console uses inittab directly since Alpine Extended doesn't include
-    // the openrc-agetty package that provides /etc/init.d/agetty
-    let inittab_content = r#"# /etc/inittab - AcornOS Live
-
-::sysinit:/sbin/openrc sysinit
-::sysinit:/sbin/openrc boot
-::wait:/sbin/openrc default
-
-# Virtual terminals
-tty1::respawn:/sbin/getty 38400 tty1
-tty2::respawn:/sbin/getty 38400 tty2
-tty3::respawn:/sbin/getty 38400 tty3
-tty4::respawn:/sbin/getty 38400 tty4
-tty5::respawn:/sbin/getty 38400 tty5
-tty6::respawn:/sbin/getty 38400 tty6
-
-# Serial console with autologin for test harness
-# Uses wrapper script that spawns ash as login shell (sources /etc/profile.d/*)
-ttyS0::respawn:/sbin/getty -n -l /usr/local/bin/serial-autologin 115200 ttyS0 vt100
-
-# Ctrl+Alt+Del
-::ctrlaltdel:/sbin/reboot
-
-# Shutdown
-::shutdown:/sbin/openrc shutdown
-"#;
-    fs::write(live_overlay.join("etc/inittab"), inittab_content)?;
-
-    // Ensure runlevels directory exists for services enabled via profile/live-overlay
-    let runlevels_default = live_overlay.join("etc/runlevels/default");
-    fs::create_dir_all(&runlevels_default)?;
-
-    // NOTE: Serial console is handled via inittab, not OpenRC service,
-    // since Alpine Extended doesn't include the openrc-agetty package.
-
-    // Create conf.d directory for future service configuration
-    let conf_d = live_overlay.join("etc/conf.d");
-    fs::create_dir_all(&conf_d)?;
-
-    // =========================================================================
-    // P1: Volatile log storage
-    // =========================================================================
-    // Mount /var/log as tmpfs to prevent filling the overlay tmpfs.
-    // Live session logs are ephemeral anyway - no need to persist them.
-    // Size limit prevents runaway logging from killing the session.
-    let fstab_content = r#"# AcornOS Live fstab
-# Volatile log storage - prevents logs from filling overlay tmpfs
-tmpfs   /var/log    tmpfs   nosuid,nodev,noexec,size=64M,mode=0755   0 0
-"#;
-    fs::write(live_overlay.join("etc/fstab"), fstab_content)?;
-
-    // Create local.d script to ensure /var/log is mounted early
-    // (fstab may not be processed before syslog starts)
-    fs::create_dir_all(live_overlay.join("etc/local.d"))?;
-    let volatile_log_script = r#"#!/bin/sh
-# P1: Ensure volatile log storage for live session
-# This runs early in boot to catch any logs before syslog starts
-
-# Only mount if not already a tmpfs (idempotent)
-if ! mountpoint -q /var/log 2>/dev/null; then
-    # Preserve any existing logs created before mount
-    if [ -d /var/log ]; then
-        mkdir -p /tmp/log-backup
-        cp -a /var/log/* /tmp/log-backup/ 2>/dev/null || true
-    fi
-
-    mount -t tmpfs -o nosuid,nodev,noexec,size=64M,mode=0755 tmpfs /var/log
-
-    # Restore preserved logs
-    if [ -d /tmp/log-backup ]; then
-        cp -a /tmp/log-backup/* /var/log/ 2>/dev/null || true
-        rm -rf /tmp/log-backup
-    fi
-
-    # Ensure log directories exist
-    mkdir -p /var/log/chrony 2>/dev/null || true
-fi
-"#;
-    let script_path = live_overlay.join("etc/local.d/00-volatile-log.start");
-    fs::write(&script_path, volatile_log_script)?;
-    let mut perms = fs::metadata(&script_path)?.permissions();
-    perms.set_mode(0o755);
-    fs::set_permissions(&script_path, perms)?;
-
-    // Mount efivarfs if not already mounted (needed for bootctl, efibootmgr)
-    // The initramfs mount might not persist through switch_root properly
-    let efivars_script = r#"#!/bin/sh
-# Ensure efivarfs is mounted for UEFI support
-# Needed for efibootmgr, bootctl, and install tests
-
-if [ -d /sys/firmware/efi ]; then
-    mkdir -p /sys/firmware/efi/efivars 2>/dev/null
-    mount -t efivarfs efivarfs /sys/firmware/efi/efivars 2>/dev/null || true
-fi
-"#;
-    let efivars_script_path = live_overlay.join("etc/local.d/01-efivarfs.start");
-    fs::write(&efivars_script_path, efivars_script)?;
-    let mut perms = fs::metadata(&efivars_script_path)?.permissions();
-    perms.set_mode(0o755);
-    fs::set_permissions(&efivars_script_path, perms)?;
-
-    // =========================================================================
-    // P1: Do-not-suspend configuration
-    // =========================================================================
-    // Prevent the system from suspending during live session.
-    // Users are likely installing - suspend would be disruptive.
-
-    // Method 1: ACPI power button handler - do nothing on lid close/power button
-    fs::create_dir_all(live_overlay.join("etc/acpi"))?;
-    let acpi_handler = r#"#!/bin/sh
-# AcornOS Live: Disable suspend actions
-# Power button and lid close do nothing during live session
-
-case "$1" in
-    button/power)
-        # Log but don't suspend - user is probably installing
-        logger "AcornOS Live: Power button pressed (suspend disabled)"
-        ;;
-    button/lid)
-        # Lid close does nothing - prevent accidental suspend
-        logger "AcornOS Live: Lid event ignored (suspend disabled)"
-        ;;
-    *)
-        # Let other events through to default handler
-        ;;
-esac
-"#;
-    let handler_path = live_overlay.join("etc/acpi/handler.sh");
-    fs::write(&handler_path, acpi_handler)?;
-    let mut perms = fs::metadata(&handler_path)?.permissions();
-    perms.set_mode(0o755);
-    fs::set_permissions(&handler_path, perms)?;
-
-    // Method 2: Kernel parameters to disable suspend
-    // This is set via sysctl for runtime
-    let sysctl_content = r#"# AcornOS Live: Disable suspend
-# Prevent accidental suspend during installation
-
-# Disable suspend-to-RAM
-kernel.sysrq = 1
-
-# Note: Full suspend disable requires either:
-# - elogind HandleLidSwitch=ignore (if using elogind)
-# - acpid handler (provided above)
-# - Or simply not having any suspend triggers
-"#;
-    fs::create_dir_all(live_overlay.join("etc/sysctl.d"))?;
-    fs::write(
-        live_overlay.join("etc/sysctl.d/50-live-no-suspend.conf"),
-        sysctl_content,
-    )?;
-
-    // Method 3: If elogind is present, configure it
-    fs::create_dir_all(live_overlay.join("etc/elogind/logind.conf.d"))?;
-    let logind_conf = r#"# AcornOS Live: Disable suspend triggers
-[Login]
-HandlePowerKey=ignore
-HandleSuspendKey=ignore
-HandleHibernateKey=ignore
-HandleLidSwitch=ignore
-HandleLidSwitchExternalPower=ignore
-HandleLidSwitchDocked=ignore
-IdleAction=ignore
-"#;
-    fs::write(
-        live_overlay.join("etc/elogind/logind.conf.d/00-live-no-suspend.conf"),
-        logind_conf,
-    )?;
-
-    println!("  Live overlay created at {}", live_overlay.display());
+    create_openrc_live_overlay(output_dir, &config)?;
     Ok(())
 }
 
