@@ -34,7 +34,6 @@
 //! ```
 
 pub mod artifact;
-pub mod build;
 pub mod component;
 pub mod config;
 pub mod preflight;
