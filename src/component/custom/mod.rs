@@ -8,6 +8,7 @@ mod live;
 
 use anyhow::Result;
 
+use distro_builder::LicenseTracker;
 use distro_spec::shared::auth::ssh::SSHD_CONFIG_SETTINGS;
 use distro_spec::shared::busybox::{COMMON_APPLETS, SBIN_APPLETS};
 use distro_spec::shared::components::{FHS_SYMLINKS, VAR_SYMLINKS};
@@ -19,56 +20,68 @@ use super::BuildContext;
 use super::CustomOp;
 
 /// Execute a custom operation.
-pub fn execute(ctx: &BuildContext, op: CustomOp) -> Result<()> {
+///
+/// Some operations copy content that requires license tracking. The tracker
+/// is used to register packages for license compliance.
+pub fn execute(ctx: &BuildContext, op: CustomOp, tracker: &LicenseTracker) -> Result<()> {
     match op {
-        // Filesystem operations
+        // Filesystem operations (no content copying)
         CustomOp::CreateFhsSymlinks => {
             distro_builder::alpine::filesystem::create_fhs_symlinks(ctx, FHS_SYMLINKS, VAR_SYMLINKS)
         }
 
-        // Branding
+        // Branding (config files only)
         CustomOp::CreateEtcFiles => branding::create_etc_files(ctx),
         CustomOp::CreateSecurityConfig => branding::create_security_config(ctx),
 
-        // Busybox
+        // Busybox (symlinks only, busybox itself tracked via Op::Bin)
         CustomOp::CreateBusyboxApplets => distro_builder::alpine::busybox::create_applet_symlinks(
             ctx,
             SBIN_APPLETS,
             COMMON_APPLETS,
         ),
 
-        // Device manager
+        // Device manager (config only)
         CustomOp::SetupDeviceManager => {
             distro_builder::alpine::filesystem::setup_device_manager(ctx)
         }
 
-        // Kernel modules
-        CustomOp::CopyModules => distro_builder::alpine::modules::copy_modules(
-            ctx,
-            "acornos build kernel",
-            MODULE_METADATA_FILES,
-        ),
+        // Kernel modules - register kernel package
+        CustomOp::CopyModules => {
+            tracker.register_package("linux-lts");
+            distro_builder::alpine::modules::copy_modules(
+                ctx,
+                "acornos build kernel",
+                MODULE_METADATA_FILES,
+            )
+        }
 
-        // Firmware
+        // Firmware - register linux-firmware package
         CustomOp::CopyWifiFirmware => {
+            tracker.register_package("linux-firmware");
             distro_builder::alpine::firmware::copy_firmware_dirs(ctx, WIFI_FIRMWARE_DIRS)
         }
 
-        // Timezone
-        CustomOp::CopyTimezoneData => branding::copy_timezone_data(ctx),
+        // Timezone - register tzdata package
+        CustomOp::CopyTimezoneData => {
+            tracker.register_package("tzdata");
+            branding::copy_timezone_data(ctx)
+        }
 
-        // Live ISO
+        // Live ISO (generated content, no third-party packages)
         CustomOp::CreateWelcomeMessage => live::create_welcome_message(ctx),
         CustomOp::CreateLiveOverlay => live::create_live_overlay(ctx),
         CustomOp::CopyRecstrap => live::copy_recstrap(ctx),
 
-        // Libraries
+        // Libraries - register musl (the libc providing most .so files)
         CustomOp::CopyAllLibraries => {
+            tracker.register_package("musl");
             distro_builder::alpine::filesystem::copy_all_libraries(ctx, LIBRARY_DIRS)
         }
 
-        // SSH
+        // SSH - register openssh package
         CustomOp::SetupSsh => {
+            tracker.register_package("openssh");
             distro_builder::alpine::ssh::setup_ssh(ctx, "root@acornos", SSHD_CONFIG_SETTINGS)
         }
     }

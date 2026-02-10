@@ -8,16 +8,17 @@ use std::fs;
 use std::path::Path;
 
 use distro_builder::executor::{binaries, directories, files, openrc, users};
+use distro_builder::LicenseTracker;
 
 use super::BuildContext;
 use super::{Component, Op};
 
 /// Execute all operations in a component.
-pub fn execute(ctx: &BuildContext, component: &Component) -> Result<()> {
+pub fn execute(ctx: &BuildContext, component: &Component, tracker: &LicenseTracker) -> Result<()> {
     println!("Installing {}...", component.name);
 
     for op in component.ops {
-        execute_op(ctx, op)
+        execute_op(ctx, op, tracker)
             .with_context(|| format!("in component '{}': {:?}", component.name, op))?;
     }
 
@@ -25,7 +26,7 @@ pub fn execute(ctx: &BuildContext, component: &Component) -> Result<()> {
 }
 
 /// Execute a single operation.
-fn execute_op(ctx: &BuildContext, op: &Op) -> Result<()> {
+fn execute_op(ctx: &BuildContext, op: &Op, tracker: &LicenseTracker) -> Result<()> {
     match op {
         // Directory operations
         Op::Dir(path) => directories::handle_dir(&ctx.staging, path)?,
@@ -42,13 +43,21 @@ fn execute_op(ctx: &BuildContext, op: &Op) -> Result<()> {
         Op::CopyTree(path) => copy_tree(&ctx.source.join(path), &ctx.staging.join(path))?,
 
         // Binary operations
-        Op::Bin(name) => binaries::copy_binary(&ctx.source, &ctx.staging, name, "usr/bin")?,
-        Op::Sbin(name) => binaries::copy_binary(&ctx.source, &ctx.staging, name, "usr/sbin")?,
+        Op::Bin(name) => {
+            binaries::copy_binary(&ctx.source, &ctx.staging, name, "usr/bin")?;
+            tracker.register_binary(name);
+        }
+        Op::Sbin(name) => {
+            binaries::copy_binary(&ctx.source, &ctx.staging, name, "usr/sbin")?;
+            tracker.register_binary(name);
+        }
         Op::Bins(names) => {
             let mut errors = Vec::new();
             for name in *names {
                 if let Err(e) = binaries::copy_binary(&ctx.source, &ctx.staging, name, "usr/bin") {
                     errors.push(format!("{}: {}", name, e));
+                } else {
+                    tracker.register_binary(name);
                 }
             }
             if !errors.is_empty() {
@@ -60,6 +69,8 @@ fn execute_op(ctx: &BuildContext, op: &Op) -> Result<()> {
             for name in *names {
                 if binaries::copy_binary(&ctx.source, &ctx.staging, name, "usr/sbin").is_err() {
                     missing.push(*name);
+                } else {
+                    tracker.register_binary(name);
                 }
             }
             if !missing.is_empty() {
@@ -90,7 +101,7 @@ fn execute_op(ctx: &BuildContext, op: &Op) -> Result<()> {
 
         // Custom operations
         Op::Custom(custom_op) => {
-            super::custom::execute(ctx, *custom_op)?;
+            super::custom::execute(ctx, *custom_op, tracker)?;
         }
     }
 

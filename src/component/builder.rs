@@ -6,6 +6,8 @@
 use anyhow::Result;
 use std::fs;
 
+use distro_builder::{LicenseTracker, PackageManager};
+
 use super::definitions::ALL_COMPONENTS;
 use super::executor;
 use super::BuildContext;
@@ -37,10 +39,17 @@ pub fn build_system(ctx: &BuildContext) -> Result<()> {
     // Prepare staging directory
     prepare_staging(ctx)?;
 
+    // Track licenses for all binaries we copy
+    let tracker = LicenseTracker::new(ctx.source.clone(), PackageManager::Apk);
+
     // Execute all components
     for component in ALL_COMPONENTS {
-        executor::execute(ctx, component)?;
+        executor::execute(ctx, component, &tracker)?;
     }
+
+    // Copy license files for all redistributed packages
+    let license_count = tracker.copy_licenses(&ctx.source, &ctx.staging)?;
+    println!("  Copied licenses for {} packages", license_count);
 
     println!("\n=== System Build Complete ===\n");
 
