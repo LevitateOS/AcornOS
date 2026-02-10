@@ -13,9 +13,8 @@ anyhow = "1.0"
 clap = { version = "4", features = ["derive"] }
 distro-spec = { path = "../distro-spec" }
 distro-builder = { path = "../distro-builder" }
-hex = "0.4"
+recinit = { path = "../tools/recinit" }
 recuki = { path = "../tools/recuki" }
-sha2 = "0.10"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "process"] }
 
 [dev-dependencies]
