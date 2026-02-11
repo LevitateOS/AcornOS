@@ -2,7 +2,7 @@
 //
 // Provides: extracted Alpine rootfs for acornos to build upon
 // Output: RECIPE_DIR/../downloads/rootfs
-//
+
 // === Globals (provided by executor) ===
 //
 // BUILD_DIR   - Temporary build directory for intermediate files
@@ -47,18 +47,23 @@
 // Logging:
 //   log(msg)                  - Print info message
 
+// === Build Dependencies ===
+// 7z-deps will be resolved and installed to BUILD_DIR/.tools before the build phase
+// This provides the 7z tool for ISO extraction
+let build_deps = ["7z-deps"];
+
 let ctx = #{
-    apk_static_path: "/home/vince/Projects/LevitateOS/AcornOS/downloads/apk-tools/sbin/apk.static",
-    apk_tools_name: "apk-tools-static-3.0.3-r1.apk",
-    apk_tools_sha256: "b7bb8715648d32854f06392468f69cd1dd4904d5fac9f9e43fc5d6942d53597c",
-    apk_tools_url: "https://dl-cdn.alpinelinux.org/alpine/v3.23/main/x86_64/apk-tools-static-3.0.3-r1.apk",
+    apk_static_path: "/home/vince/LevitateOS/AcornOS/downloads/apk-tools/sbin/apk.static",
+    apk_tools_name: "apk-tools-static-3.0.4-r0.apk",
+    apk_tools_sha256: "a6820637fdcbd2e700f5ced9569d0866b28fa999cb0792a6ab19ea66cf18209a",
+    apk_tools_url: "https://dl-cdn.alpinelinux.org/alpine/v3.23/main/x86_64/apk-tools-static-3.0.4-r0.apk",
     description: "Alpine Linux rootfs (extracted from Extended ISO)",
     disk_buffer: 536870912,
     iso_name: "alpine-extended-3.23.2-x86_64.iso",
-    iso_path: "/home/vince/Projects/LevitateOS/AcornOS/downloads/alpine-extended-3.23.2-x86_64.iso",
+    iso_path: "/home/vince/LevitateOS/AcornOS/downloads/alpine-extended-3.23.2-x86_64.iso",
     iso_url: "https://dl-cdn.alpinelinux.org/alpine/v3.23/releases/x86_64/alpine-extended-3.23.2-x86_64.iso",
     name: "alpine",
-    rootfs_path: "/home/vince/Projects/LevitateOS/AcornOS/deps/../downloads/rootfs",
+    rootfs_path: "",
     sha256: "8d50854936dba58e7616ac3bfa07ad67dac0347305fec1cba6d288cf5df1577d",
     sha256_url: "https://dl-cdn.alpinelinux.org/alpine/v3.23/releases/x86_64/alpine-extended-3.23.2-x86_64.iso.sha256",
     size_bytes: 1413529600,
@@ -176,11 +181,29 @@ fn build(ctx) {
         rm(version_file);
     }
 
-    // Extract ISO (using 7z since extract() doesn't support ISO format)
+    // Extract ISO (mount and copy, or use 7z if available)
     if !is_dir(join_path(iso_contents, "apks")) {
         log("Extracting ISO...");
         mkdir(iso_contents);
-        shell("7z x -y -o" + iso_contents + " " + ctx.iso_path + " > /dev/null");
+
+        // Try 7z first, fall back to mount
+        if shell_status("which 7z") == 0 {
+            let extract_cmd = "7z x -y -o" + iso_contents + " " + ctx.iso_path;
+            shell(extract_cmd);
+        } else {
+            log("Mounting ISO with loop device...");
+            let mount_point = join_path(BUILD_DIR, "mnt");
+            mkdir(mount_point);
+
+            let mount_cmd = "mount -o loop,ro " + ctx.iso_path + " " + mount_point;
+            shell(mount_cmd);
+
+            let copy_cmd = "cp -r " + mount_point + "/* " + iso_contents + "/";
+            shell(copy_cmd);
+
+            let umount_cmd = "umount " + mount_point;
+            shell(umount_cmd);
+        }
     }
 
     // Create rootfs
