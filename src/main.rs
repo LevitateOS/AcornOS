@@ -129,21 +129,31 @@ fn main() {
             Some(DownloadTarget::Tools) => cmd_download_tools(),
             Some(DownloadTarget::All) | None => cmd_download_all(),
         },
-        Commands::Build { artifact, kernel, dangerously_waste_the_users_time } => {
+        Commands::Build {
+            artifact,
+            kernel,
+            dangerously_waste_the_users_time,
+        } => {
             use distro_contract::kernel::{KernelBuildGuard, KernelGuard};
             match artifact {
                 Some(BuildArtifact::Kernel { clean }) => {
-                    KernelGuard::new(true, dangerously_waste_the_users_time,
+                    KernelGuard::new(
+                        true,
+                        dangerously_waste_the_users_time,
                         "cargo run -- build kernel --dangerously-waste-the-users-time",
-                    ).require_kernel_confirmation();
+                    )
+                    .require_kernel_confirmation();
                     cmd_build_kernel(clean)
                 }
                 Some(BuildArtifact::Rootfs) => cmd_build_rootfs(),
                 None => {
                     if kernel {
-                        KernelGuard::new(true, dangerously_waste_the_users_time,
+                        KernelGuard::new(
+                            true,
+                            dangerously_waste_the_users_time,
                             "cargo run -- build --kernel --dangerously-waste-the-users-time",
-                        ).require_kernel_confirmation();
+                        )
+                        .require_kernel_confirmation();
                         cmd_build_with_kernel()
                     } else {
                         cmd_build()
@@ -194,7 +204,7 @@ fn resolve_kernel(base_dir: &std::path::Path) -> Result<()> {
 }
 
 fn cmd_build() -> Result<()> {
-    use distro_builder::alpine::timing::Timer;
+    use distro_builder::timing::Timer;
     use std::time::Instant;
 
     let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -250,7 +260,7 @@ fn cmd_build() -> Result<()> {
 }
 
 fn cmd_build_with_kernel() -> Result<()> {
-    use distro_builder::alpine::timing::Timer;
+    use distro_builder::timing::Timer;
     use std::time::Instant;
 
     let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -313,7 +323,7 @@ fn cmd_build_with_kernel() -> Result<()> {
 }
 
 fn cmd_build_kernel(clean: bool) -> Result<()> {
-    use distro_builder::alpine::timing::Timer;
+    use distro_builder::timing::Timer;
 
     let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
 
@@ -331,7 +341,8 @@ fn cmd_build_kernel(clean: bool) -> Result<()> {
     if needs_compile || needs_install {
         println!("Building kernel via recipe...");
         let t = Timer::start("Kernel");
-        let linux = distro_builder::recipe::linux::linux(&base_dir, &distro_spec::acorn::KERNEL_SOURCE)?;
+        let linux =
+            distro_builder::recipe::linux::linux(&base_dir, &distro_spec::acorn::KERNEL_SOURCE)?;
         acornos::rebuild::cache_kernel_hash(&base_dir);
         t.finish();
 
@@ -452,7 +463,8 @@ fn cmd_download_all() -> Result<()> {
     println!("Alpine:  {} [OK]", alpine.iso.display());
 
     // Linux kernel (via recipe)
-    let linux = distro_builder::recipe::linux::linux(&base_dir, &distro_spec::acorn::KERNEL_SOURCE)?;
+    let linux =
+        distro_builder::recipe::linux::linux(&base_dir, &distro_spec::acorn::KERNEL_SOURCE)?;
     println!("Linux:   {} [OK]", linux.source.display());
 
     // Installation tools
@@ -486,7 +498,10 @@ fn cmd_download_linux() -> Result<()> {
     let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let source = &distro_spec::acorn::KERNEL_SOURCE;
 
-    println!("Linux kernel (AcornOS target: {} mainline):", source.version);
+    println!(
+        "Linux kernel (AcornOS target: {} mainline):",
+        source.version
+    );
 
     let linux = distro_builder::recipe::linux::linux(&base_dir, source)?;
     println!("  Source:      {}", linux.source.display());
@@ -568,7 +583,9 @@ fn cmd_status() -> Result<()> {
 
     // Check Linux kernel source
     let kernel_spec = &distro_spec::acorn::KERNEL_SOURCE;
-    let tarball_source = base_dir.join("downloads").join(kernel_spec.source_dir_name());
+    let tarball_source = base_dir
+        .join("downloads")
+        .join(kernel_spec.source_dir_name());
     println!("Kernel Source (v{}):", kernel_spec.version);
     if tarball_source.join("Makefile").exists() {
         println!("  Linux source:    FOUND at {}", tarball_source.display());
