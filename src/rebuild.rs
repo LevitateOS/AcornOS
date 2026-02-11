@@ -56,9 +56,9 @@ pub fn kernel_needs_install(base_dir: &Path) -> bool {
 /// Cache the kernel input hash after a successful build.
 pub fn cache_kernel_hash(base_dir: &Path) {
     let kconfig = base_dir.join("kconfig");
-    let kernel_source_dir = base_dir.join("downloads").join(
-        distro_spec::acorn::KERNEL_SOURCE.source_dir_name()
-    );
+    let kernel_source_dir = base_dir
+        .join("downloads")
+        .join(distro_spec::acorn::KERNEL_SOURCE.source_dir_name());
     let kernel_makefile = kernel_source_dir.join("Makefile");
 
     let inputs: Vec<&Path> = if kernel_makefile.exists() {
