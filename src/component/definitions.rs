@@ -15,9 +15,8 @@
 use distro_contract::component::Phase;
 
 use super::{
-    bin, bins, copy_file, copy_tree, custom, dir, dir_mode, dirs, group, openrc_conf,
-    openrc_enable, openrc_scripts, sbins, symlink, user, write_file, write_file_mode, Component,
-    CustomOp,
+    bin, copy_file, copy_tree, custom, dir, dir_mode, dirs, group, openrc_conf, openrc_enable,
+    openrc_scripts, symlink, user, write_file, write_file_mode, Component, CustomOp,
 };
 
 // =============================================================================
@@ -106,6 +105,7 @@ pub static BUSYBOX: Component = Component {
 ///
 /// These are standalone binaries that need to be copied from
 /// the Alpine rootfs with their library dependencies.
+#[allow(dead_code)]
 const ADDITIONAL_BINS: &[&str] = &[
     // Shells
     "bash",
@@ -122,6 +122,7 @@ const ADDITIONAL_BINS: &[&str] = &[
     "ssh-keygen",
 ];
 
+#[allow(dead_code)]
 const ADDITIONAL_SBINS: &[&str] = &[
     // OpenRC init system (CRITICAL - these must be copied before OPENRC component)
     "openrc",
@@ -160,10 +161,17 @@ const ADDITIONAL_SBINS: &[&str] = &[
 /// Additional utilities component.
 ///
 /// Binaries beyond what busybox provides.
+///
+/// NOTE: Temporarily disabled for minimal ISO testing.
+/// Requires packages.rhai to be run first.
 pub static UTILITIES: Component = Component {
     name: "utilities",
     phase: Phase::Binaries,
-    ops: &[bins(ADDITIONAL_BINS), sbins(ADDITIONAL_SBINS)],
+    ops: &[
+        // Placeholder - temporarily disabled
+        // Will be re-enabled when packages.rhai is run to install bash, vim, etc.
+        dir("opt"),
+    ],
 };
 
 // =============================================================================
@@ -197,10 +205,11 @@ const OPENRC_SCRIPTS: &[&str] = &[
     "mdev",
     // Note: urandom doesn't exist in Alpine - seedrng handles random seed
     // Services
-    "sshd",
-    "chronyd",
-    "dhcpcd",
-    "iwd",
+    // Temporarily disabled - require packages.rhai for:
+    // "sshd",     // requires openssh
+    // "chronyd",  // requires chrony
+    // "dhcpcd",   // requires dhcpcd
+    // "iwd",      // requires iwd
     "local",
 ];
 
@@ -230,6 +239,11 @@ pub static OPENRC: Component = Component {
         // 2. Spawns gettys via ::respawn: lines
         // openrc-init does NOT properly handle inittab respawn lines
         symlink("sbin/init", "/bin/busybox"),
+        // Copy OpenRC binaries (required for OpenRC to function)
+        copy_file("sbin/openrc"),
+        copy_file("sbin/openrc-init"),
+        copy_file("sbin/openrc-run"),
+        copy_file("sbin/openrc-shutdown"),
         // Copy OpenRC support scripts and binaries
         // These are REQUIRED for OpenRC to function
         copy_tree("usr/libexec/rc"),

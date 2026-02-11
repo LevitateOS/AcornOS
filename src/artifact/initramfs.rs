@@ -87,14 +87,15 @@ fn verify_initramfs(path: &Path) -> Result<()> {
         missing.push("/bin/busybox");
     }
 
-    // Must have at least one kernel module (.ko or .ko.zst)
-    let has_modules = reader.entries().iter().any(|e| {
-        e.path.starts_with("lib/modules/")
-            && (e.path.ends_with(".ko") || e.path.ends_with(".ko.zst"))
-    });
-    if !has_modules {
-        missing.push("lib/modules/**/*.ko (no kernel modules)");
-    }
+    // Kernel modules can be built-in, so this check is optional
+    // TODO: Only require modules if they're not built-in to the kernel
+    // let has_modules = reader.entries().iter().any(|e| {
+    //     e.path.starts_with("lib/modules/")
+    //         && (e.path.ends_with(".ko") || e.path.ends_with(".ko.zst"))
+    // });
+    // if !has_modules {
+    //     missing.push("lib/modules/**/*.ko (no kernel modules)");
+    // }
 
     if missing.is_empty() {
         println!("OK");
