@@ -1,0 +1,37 @@
+#!/sbin/openrc-run
+
+description="the mdev device manager"
+
+depend() {
+	provide dev
+	need sysfs dev-mount
+	before checkfs fsck
+	keyword -containers -vserver -lxc
+}
+
+_start_coldplug () {
+	ebegin "Scanning hardware for mdev"
+	# mdev -s will not create /dev/usb[1-9] devices with recent kernels
+	# so we manually trigger events for usb
+	for i in $(find /sys/devices -name 'usb[0-9]*'); do
+		[ -e $i/uevent ] && echo add > $i/uevent
+	done
+	# trigger the rest of the coldplug
+	mdev -s
+	eend $?
+}
+
+start() {
+	# Note: Legacy /proc/sys/kernel/hotplug removed from modern kernels
+	# mdev now works directly with uevent through sysfs
+	ebegin "Starting busybox mdev"
+	mkdir -p /dev
+	eend 0
+	_start_coldplug
+}
+
+stop() {
+	ebegin "Stopping busybox mdev"
+	# Note: /proc/sys/kernel/hotplug no longer exists
+	eend 0
+}

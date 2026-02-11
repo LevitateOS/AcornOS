@@ -45,6 +45,7 @@ let TIER1_CORE = [
 
 let TIER2_DAILY = [
     // Network
+    "ifupdown-ng",
     "dhcpcd",
     "iproute2",
     "iputils",
@@ -82,12 +83,12 @@ let TIER3_LIVE = [
 ];
 
 // Version for cache invalidation - bump when package list changes
-let PACKAGE_LIST_VERSION = "1.0.1";
+let PACKAGE_LIST_VERSION = "1.0.2";
 
 let ctx = #{
     description: "Supplementary APKs for Alpine rootfs",
     name: "packages",
-    version: "1.0.1",
+    version: "1.0.2",
     rootfs_path: "",
     apk_static_path: "",
     packages_installed: 0,
@@ -175,7 +176,7 @@ fn build(ctx) {
 
     // === Tier 2: Daily Driver ===
     log("Installing Tier 2: Daily driver...");
-    let tier2a = "dhcpcd iproute2 iputils iwd wireless-regdb ca-certificates tzdata chrony";
+    let tier2a = "ifupdown-ng dhcpcd iproute2 iputils iwd wireless-regdb ca-certificates tzdata chrony";
     shell(apk_cmd + tier2a);
 
     let tier2b = "curl less vim htop pciutils usbutils dmidecode ethtool";
