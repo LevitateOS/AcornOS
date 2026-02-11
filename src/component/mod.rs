@@ -208,6 +208,8 @@ pub enum CustomOp {
     CopyAllLibraries,
     /// Generate SSH host keys and configure sshd.
     SetupSsh,
+    /// Install checkpoint test scripts.
+    InstallCheckpointTests,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

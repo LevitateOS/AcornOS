@@ -523,6 +523,17 @@ pub static FIRMWARE: Component = Component {
 // Phase 9: Final
 // =============================================================================
 
+/// Checkpoint test scripts component.
+///
+/// Installs test scripts that validate each checkpoint stage.
+/// These are used for both automated testing and manual verification.
+/// Scripts are installed to /usr/local/bin/ and are always available.
+pub static CHECKPOINT_TESTS: Component = Component {
+    name: "checkpoint-tests",
+    phase: Phase::Final,
+    ops: &[custom(CustomOp::InstallCheckpointTests)],
+};
+
 /// Final setup component for live ISO.
 pub static LIVE_FINAL: Component = Component {
     name: "live-final",
@@ -581,6 +592,7 @@ pub static ALL_COMPONENTS: &[&Component] = &[
     // Phase 8: Firmware
     &FIRMWARE,
     // Phase 9: Final
+    &CHECKPOINT_TESTS,
     &LIVE_FINAL,
 ];
 
