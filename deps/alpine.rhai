@@ -63,7 +63,7 @@ let ctx = #{
     iso_path: "/home/vince/LevitateOS/AcornOS/downloads/alpine-extended-3.23.2-x86_64.iso",
     iso_url: "https://dl-cdn.alpinelinux.org/alpine/v3.23/releases/x86_64/alpine-extended-3.23.2-x86_64.iso",
     name: "alpine",
-    rootfs_path: "",
+    rootfs_path: "/home/vince/LevitateOS/AcornOS/deps/../downloads/rootfs",
     sha256: "8d50854936dba58e7616ac3bfa07ad67dac0347305fec1cba6d288cf5df1577d",
     sha256_url: "https://dl-cdn.alpinelinux.org/alpine/v3.23/releases/x86_64/alpine-extended-3.23.2-x86_64.iso.sha256",
     size_bytes: 1413529600,
@@ -181,27 +181,32 @@ fn build(ctx) {
         rm(version_file);
     }
 
-    // Extract ISO (mount and copy, or use 7z if available)
+    // Extract ISO (xorriso → 7z → mount)
     if !is_dir(join_path(iso_contents, "apks")) {
         log("Extracting ISO...");
         mkdir(iso_contents);
 
-        // Try 7z first, fall back to mount
-        if shell_status("which 7z") == 0 {
-            let extract_cmd = "7z x -y -o" + iso_contents + " " + ctx.iso_path;
+        // Try xorriso first (already installed on system)
+        if shell_status("which xorriso") == 0 {
+            log("Using xorriso to extract ISO...");
+            let extract_cmd = "xorriso -osirrox on -indev '" + ctx.iso_path + "' -extract / '" + iso_contents + "/'";
+            shell(extract_cmd);
+        } else if shell_status("which 7z") == 0 {
+            log("Using 7z to extract ISO...");
+            let extract_cmd = "7z x -y -o'" + iso_contents + "' '" + ctx.iso_path + "'";
             shell(extract_cmd);
         } else {
             log("Mounting ISO with loop device...");
             let mount_point = join_path(BUILD_DIR, "mnt");
             mkdir(mount_point);
 
-            let mount_cmd = "mount -o loop,ro " + ctx.iso_path + " " + mount_point;
+            let mount_cmd = "mount -o loop,ro '" + ctx.iso_path + "' '" + mount_point + "'";
             shell(mount_cmd);
 
-            let copy_cmd = "cp -r " + mount_point + "/* " + iso_contents + "/";
+            let copy_cmd = "cp -r '" + mount_point + "/'* '" + iso_contents + "/'";
             shell(copy_cmd);
 
-            let umount_cmd = "umount " + mount_point;
+            let umount_cmd = "umount '" + mount_point + "'";
             shell(umount_cmd);
         }
     }
