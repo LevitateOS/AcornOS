@@ -620,12 +620,57 @@ fn cmd_status() -> Result<()> {
         let size = std::fs::metadata(&kernel)
             .map(|m| m.len() / 1024 / 1024)
             .unwrap_or(0);
-        // Check if kernel-build is a symlink (stolen from leviso)
-        let stolen = kernel_build.is_symlink();
+
+        // Prefer provenance from the kernel release (modules dir name), since
+        // output/kernel-build may be missing even when a kernel is present.
+        let kernel_release = {
+            let staging = output_dir.join("staging");
+            let candidates = [staging.join("lib/modules"), staging.join("usr/lib/modules")];
+            let mut found = None;
+            for dir in candidates {
+                if let Ok(entries) = std::fs::read_dir(&dir) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if path.is_dir() {
+                            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                                found = Some(name.to_string());
+                                break;
+                            }
+                        }
+                    }
+                }
+                if found.is_some() {
+                    break;
+                }
+            }
+            found
+        };
+
+        let expected_suffix = kernel_spec.localversion;
+        let built_for_distro = kernel_release
+            .as_deref()
+            .map(|r| r.contains(expected_suffix))
+            .unwrap_or(false);
+        let stolen = kernel_build.is_symlink()
+            || kernel_release
+                .as_deref()
+                .map(|r| r.contains("-levitate"))
+                .unwrap_or(false);
+
+        let release_suffix = kernel_release
+            .as_deref()
+            .map(|r| format!(" ({})", r))
+            .unwrap_or_default();
+
         if stolen {
-            println!("  Kernel:          STOLEN from LevitateOS ({} MB)", size);
+            println!(
+                "  Kernel:          STOLEN from LevitateOS ({} MB){}",
+                size, release_suffix
+            );
+        } else if built_for_distro {
+            println!("  Kernel:          BUILT ({} MB){}", size, release_suffix);
         } else {
-            println!("  Kernel:          BUILT ({} MB)", size);
+            println!("  Kernel:          PRESENT ({} MB){}", size, release_suffix);
         }
     } else {
         println!("  Kernel:          NOT BUILT");
