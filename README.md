@@ -33,54 +33,32 @@ Choose LevitateOS for maximum compatibility. Choose AcornOS for a smaller attack
 
 ## Status
 
-**SKELETON** - This is Step 1 of ~50 steps to a bootable AcornOS.
+**Alpha.** Produces a bootable ISO with an EROFS rootfs and tiny initramfs, and can boot in QEMU.
 
-```bash
-$ cargo run -- status
-AcornOS Builder Status
-======================
-
-Status: SKELETON - Not yet implemented
-
-AcornOS is a sibling distribution to LevitateOS:
-  - Packages sourced from Alpine repositories (musl, busybox)
-  - OpenRC init system
-  - Daily driver desktop (NOT minimal)
-
-Next steps:
-  1. Implement Alpine APK extraction
-  2. Create OpenRC service components
-  3. Build initramfs with mdev
-  4. Create bootable ISO
-```
-
-### Implemented
-- CLI structure with subcommands
-- `status` command
-- DistroConfig implementation using distro-spec::acorn
-- Placeholder modules for future implementation
-
-### Not Yet Implemented
-- Alpine APK extraction
-- OpenRC service setup
-- Component definitions
-- Initramfs building
-- ISO creation
-- QEMU runner
+Specs are defined in `distro-spec/src/acorn/` (packages, services, paths, UKI entries).
 
 ## Usage
 
 ```bash
-# Show status (the only working command)
+cd AcornOS
+
+# Show status / next steps
 cargo run -- status
 
-# These return unimplemented!() for now:
-cargo run -- build      # Build complete ISO
-cargo run -- initramfs  # Build initramfs only
-cargo run -- iso        # Build ISO only
-cargo run -- run        # Run in QEMU
-cargo run -- download   # Download Alpine packages
-cargo run -- extract    # Extract Alpine packages
+# Validate host tools and prerequisites
+cargo run -- preflight
+
+# Download Alpine ISO + apk-tools, install package tiers
+cargo run -- download alpine
+
+# Build (kernel may be reused/stolen; full kernel build requires explicit confirmation)
+cargo run -- build
+
+# Boot in QEMU
+cargo run -- run
+
+# Automated headless boot smoke test
+cargo run -- test
 ```
 
 ## Architecture
@@ -88,13 +66,14 @@ cargo run -- extract    # Extract Alpine packages
 ```
 AcornOS/
 ├── src/
-│   ├── main.rs        # CLI with clap
-│   ├── lib.rs         # Library root
+│   ├── main.rs        # CLI entrypoint
 │   ├── config.rs      # DistroConfig implementation
-│   ├── extract.rs     # Alpine APK extraction (placeholder)
-│   └── component/
-│       └── mod.rs     # OpenRC-specific components (placeholder)
-└── CLAUDE.md          # Development guidelines
+│   ├── artifact/      # rootfs/initramfs/ISO builders
+│   ├── component/     # OpenRC components and wiring
+│   ├── qemu.rs        # QEMU runner
+│   └── rebuild.rs     # Rebuild detection + caching
+├── deps/              # .rhai dependency recipes (Alpine, packages, tools)
+└── profile/           # Live overlay content injected into ISO
 ```
 
 ## Related Projects
@@ -106,12 +85,12 @@ AcornOS/
 
 ## Contributing
 
-AcornOS needs significant work. Key areas:
+Key areas:
 
-1. **Alpine APK extraction** - Either use apk-tools or implement APK parsing
-2. **OpenRC integration** - Service setup, runlevels, dependencies
-3. **mdev vs eudev** - Device manager decision
-4. **Desktop services** - dbus, elogind, seat management with musl
+1. **Package tiers**: tune `distro-spec/src/acorn/packages.rs` (daily-driver defaults)
+2. **Services**: OpenRC enablement and defaults in `distro-spec/src/acorn/services.rs`
+3. **Profiles/overlays**: live behavior in `AcornOS/profile/`
+4. **Boot/testing**: keep QEMU smoke tests and `testing/install-tests/` checkpoints green
 
 ## License
 
