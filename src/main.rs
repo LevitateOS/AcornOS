@@ -191,7 +191,8 @@ fn main() {
 /// Returns Ok if kernel is available in staging after this call.
 fn resolve_kernel(base_dir: &std::path::Path) -> Result<()> {
     let store = open_artifact_store(base_dir);
-    let staging = base_dir.join("output/staging");
+    let output_dir = distro_builder::artifact_store::central_output_dir_for_distro(base_dir);
+    let staging = output_dir.join("staging");
     let vmlinuz = staging.join("boot/vmlinuz");
     if vmlinuz.exists() {
         println!("[SKIP] Kernel already built and installed");
@@ -200,7 +201,7 @@ fn resolve_kernel(base_dir: &std::path::Path) -> Result<()> {
 
     // Try to restore from the centralized artifact store first (no compilation).
     if let Some(store) = &store {
-        let key = base_dir.join("output/.kernel-inputs.hash");
+        let key = output_dir.join(".kernel-inputs.hash");
         match distro_builder::artifact_store::try_restore_kernel_payload_from_key(
             store, &key, &staging,
         ) {
@@ -237,7 +238,7 @@ fn resolve_kernel(base_dir: &std::path::Path) -> Result<()> {
 
     // Store the kernel payload (vmlinuz + modules) for fast restore later.
     if let Some(store) = &store {
-        let key = base_dir.join("output/.kernel-inputs.hash");
+        let key = output_dir.join(".kernel-inputs.hash");
         if let Err(e) = distro_builder::artifact_store::try_store_kernel_payload_from_key(
             store,
             &key,
@@ -260,6 +261,7 @@ fn cmd_build() -> Result<()> {
 
     let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let store = open_artifact_store(&base_dir);
+    let output_dir = distro_builder::artifact_store::central_output_dir_for_distro(&base_dir);
     let build_start = Instant::now();
 
     println!("=== Full AcornOS Build ===\n");
@@ -270,10 +272,8 @@ fn cmd_build() -> Result<()> {
     // Try to restore build outputs from the centralized artifact store if the
     // output files are missing but input hashes are known.
     if let Some(store) = &store {
-        let rootfs_key = base_dir.join("output/.rootfs-inputs.hash");
-        let rootfs_out = base_dir
-            .join("output")
-            .join(distro_spec::acorn::ROOTFS_NAME);
+        let rootfs_key = output_dir.join(".rootfs-inputs.hash");
+        let rootfs_out = output_dir.join(distro_spec::acorn::ROOTFS_NAME);
         match distro_builder::artifact_store::try_restore_file_from_key(
             store,
             "rootfs_erofs",
@@ -288,10 +288,8 @@ fn cmd_build() -> Result<()> {
             ),
         }
 
-        let initramfs_key = base_dir.join("output/.initramfs-inputs.hash");
-        let initramfs_out = base_dir
-            .join("output")
-            .join(distro_spec::acorn::INITRAMFS_LIVE_OUTPUT);
+        let initramfs_key = output_dir.join(".initramfs-inputs.hash");
+        let initramfs_out = output_dir.join(distro_spec::acorn::INITRAMFS_LIVE_OUTPUT);
         match distro_builder::artifact_store::try_restore_file_from_key(
             store,
             "initramfs",
@@ -314,10 +312,8 @@ fn cmd_build() -> Result<()> {
         acornos::artifact::build_rootfs(&base_dir)?;
         acornos::rebuild::cache_rootfs_hash(&base_dir);
         if let Some(store) = &store {
-            let key = base_dir.join("output/.rootfs-inputs.hash");
-            let out = base_dir
-                .join("output")
-                .join(distro_spec::acorn::ROOTFS_NAME);
+            let key = output_dir.join(".rootfs-inputs.hash");
+            let out = output_dir.join(distro_spec::acorn::ROOTFS_NAME);
             if let Err(e) = distro_builder::artifact_store::try_store_file_from_key(
                 store,
                 "rootfs_erofs",
@@ -340,10 +336,8 @@ fn cmd_build() -> Result<()> {
         acornos::artifact::build_tiny_initramfs(&base_dir)?;
         acornos::rebuild::cache_initramfs_hash(&base_dir);
         if let Some(store) = &store {
-            let key = base_dir.join("output/.initramfs-inputs.hash");
-            let out = base_dir
-                .join("output")
-                .join(distro_spec::acorn::INITRAMFS_LIVE_OUTPUT);
+            let key = output_dir.join(".initramfs-inputs.hash");
+            let out = output_dir.join(distro_spec::acorn::INITRAMFS_LIVE_OUTPUT);
             if let Err(e) = distro_builder::artifact_store::try_store_file_from_key(
                 store,
                 "initramfs",
@@ -378,7 +372,10 @@ fn cmd_build() -> Result<()> {
     } else {
         println!("\n=== Build Complete ({:.1}s) ===", total);
     }
-    println!("  ISO: output/acornos.iso");
+    println!(
+        "  ISO: {}",
+        output_dir.join(distro_spec::acorn::ISO_FILENAME).display()
+    );
     println!("\nNext: acornos run");
 
     Ok(())
@@ -390,6 +387,7 @@ fn cmd_build_with_kernel() -> Result<()> {
 
     let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let store = open_artifact_store(&base_dir);
+    let output_dir = distro_builder::artifact_store::central_output_dir_for_distro(&base_dir);
     let build_start = Instant::now();
 
     println!("=== Full AcornOS Build (with kernel) ===\n");
@@ -402,8 +400,8 @@ fn cmd_build_with_kernel() -> Result<()> {
         distro_builder::recipe::linux::linux(&base_dir, &distro_spec::acorn::KERNEL_SOURCE)?;
         acornos::rebuild::cache_kernel_hash(&base_dir);
         if let Some(store) = &store {
-            let key = base_dir.join("output/.kernel-inputs.hash");
-            let staging = base_dir.join("output/staging");
+            let key = output_dir.join(".kernel-inputs.hash");
+            let staging = output_dir.join("staging");
             if let Err(e) = distro_builder::artifact_store::try_store_kernel_payload_from_key(
                 store,
                 &key,
@@ -428,10 +426,8 @@ fn cmd_build_with_kernel() -> Result<()> {
         acornos::artifact::build_rootfs(&base_dir)?;
         acornos::rebuild::cache_rootfs_hash(&base_dir);
         if let Some(store) = &store {
-            let key = base_dir.join("output/.rootfs-inputs.hash");
-            let out = base_dir
-                .join("output")
-                .join(distro_spec::acorn::ROOTFS_NAME);
+            let key = output_dir.join(".rootfs-inputs.hash");
+            let out = output_dir.join(distro_spec::acorn::ROOTFS_NAME);
             if let Err(e) = distro_builder::artifact_store::try_store_file_from_key(
                 store,
                 "rootfs_erofs",
@@ -453,10 +449,8 @@ fn cmd_build_with_kernel() -> Result<()> {
         acornos::artifact::build_tiny_initramfs(&base_dir)?;
         acornos::rebuild::cache_initramfs_hash(&base_dir);
         if let Some(store) = &store {
-            let key = base_dir.join("output/.initramfs-inputs.hash");
-            let out = base_dir
-                .join("output")
-                .join(distro_spec::acorn::INITRAMFS_LIVE_OUTPUT);
+            let key = output_dir.join(".initramfs-inputs.hash");
+            let out = output_dir.join(distro_spec::acorn::INITRAMFS_LIVE_OUTPUT);
             if let Err(e) = distro_builder::artifact_store::try_store_file_from_key(
                 store,
                 "initramfs",
@@ -490,7 +484,10 @@ fn cmd_build_with_kernel() -> Result<()> {
     } else {
         println!("\n=== Build Complete ({:.1}s) ===", total);
     }
-    println!("  ISO: output/acornos.iso");
+    println!(
+        "  ISO: {}",
+        output_dir.join(distro_spec::acorn::ISO_FILENAME).display()
+    );
     println!("\nNext: acornos run");
 
     Ok(())
@@ -501,9 +498,10 @@ fn cmd_build_kernel(clean: bool) -> Result<()> {
 
     let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let store = open_artifact_store(&base_dir);
+    let output_dir = distro_builder::artifact_store::central_output_dir_for_distro(&base_dir);
 
     if clean {
-        let kernel_build = base_dir.join("output/kernel-build");
+        let kernel_build = output_dir.join("kernel-build");
         if kernel_build.exists() {
             println!("Cleaning kernel build directory...");
             std::fs::remove_dir_all(&kernel_build)?;
@@ -520,8 +518,8 @@ fn cmd_build_kernel(clean: bool) -> Result<()> {
             distro_builder::recipe::linux::linux(&base_dir, &distro_spec::acorn::KERNEL_SOURCE)?;
         acornos::rebuild::cache_kernel_hash(&base_dir);
         if let Some(store) = &store {
-            let key = base_dir.join("output/.kernel-inputs.hash");
-            let staging = base_dir.join("output/staging");
+            let key = output_dir.join(".kernel-inputs.hash");
+            let staging = output_dir.join("staging");
             if let Err(e) = distro_builder::artifact_store::try_store_kernel_payload_from_key(
                 store,
                 &key,
@@ -538,7 +536,10 @@ fn cmd_build_kernel(clean: bool) -> Result<()> {
 
         println!("\n=== Kernel build complete ===");
         println!("  Version: {}", linux.version);
-        println!("  Kernel:  output/staging/boot/vmlinuz");
+        println!(
+            "  Kernel:  {}",
+            output_dir.join("staging/boot/vmlinuz").display()
+        );
     } else {
         println!("[SKIP] Kernel already built and installed");
         println!("  Use 'build kernel --clean' to force rebuild");
@@ -550,12 +551,11 @@ fn cmd_build_kernel(clean: bool) -> Result<()> {
 fn cmd_build_rootfs() -> Result<()> {
     let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let store = open_artifact_store(&base_dir);
+    let output_dir = distro_builder::artifact_store::central_output_dir_for_distro(&base_dir);
 
     if let Some(store) = &store {
-        let key = base_dir.join("output/.rootfs-inputs.hash");
-        let out = base_dir
-            .join("output")
-            .join(distro_spec::acorn::ROOTFS_NAME);
+        let key = output_dir.join(".rootfs-inputs.hash");
+        let out = output_dir.join(distro_spec::acorn::ROOTFS_NAME);
         match distro_builder::artifact_store::try_restore_file_from_key(
             store,
             "rootfs_erofs",
@@ -575,10 +575,8 @@ fn cmd_build_rootfs() -> Result<()> {
         acornos::artifact::build_rootfs(&base_dir)?;
         acornos::rebuild::cache_rootfs_hash(&base_dir);
         if let Some(store) = &store {
-            let key = base_dir.join("output/.rootfs-inputs.hash");
-            let out = base_dir
-                .join("output")
-                .join(distro_spec::acorn::ROOTFS_NAME);
+            let key = output_dir.join(".rootfs-inputs.hash");
+            let out = output_dir.join(distro_spec::acorn::ROOTFS_NAME);
             if let Err(e) = distro_builder::artifact_store::try_store_file_from_key(
                 store,
                 "rootfs_erofs",
@@ -591,7 +589,10 @@ fn cmd_build_rootfs() -> Result<()> {
         }
     } else {
         println!("[SKIP] EROFS rootfs already built (inputs unchanged)");
-        println!("  Delete output/filesystem.erofs to force rebuild");
+        println!(
+            "  Delete {} to force rebuild",
+            output_dir.join(distro_spec::acorn::ROOTFS_NAME).display()
+        );
     }
     Ok(())
 }
@@ -599,12 +600,11 @@ fn cmd_build_rootfs() -> Result<()> {
 fn cmd_initramfs() -> Result<()> {
     let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let store = open_artifact_store(&base_dir);
+    let output_dir = distro_builder::artifact_store::central_output_dir_for_distro(&base_dir);
 
     if let Some(store) = &store {
-        let key = base_dir.join("output/.initramfs-inputs.hash");
-        let out = base_dir
-            .join("output")
-            .join(distro_spec::acorn::INITRAMFS_LIVE_OUTPUT);
+        let key = output_dir.join(".initramfs-inputs.hash");
+        let out = output_dir.join(distro_spec::acorn::INITRAMFS_LIVE_OUTPUT);
         match distro_builder::artifact_store::try_restore_file_from_key(
             store,
             "initramfs",
@@ -624,10 +624,8 @@ fn cmd_initramfs() -> Result<()> {
         acornos::artifact::build_tiny_initramfs(&base_dir)?;
         acornos::rebuild::cache_initramfs_hash(&base_dir);
         if let Some(store) = &store {
-            let key = base_dir.join("output/.initramfs-inputs.hash");
-            let out = base_dir
-                .join("output")
-                .join(distro_spec::acorn::INITRAMFS_LIVE_OUTPUT);
+            let key = output_dir.join(".initramfs-inputs.hash");
+            let out = output_dir.join(distro_spec::acorn::INITRAMFS_LIVE_OUTPUT);
             if let Err(e) = distro_builder::artifact_store::try_store_file_from_key(
                 store,
                 "initramfs",
@@ -643,7 +641,12 @@ fn cmd_initramfs() -> Result<()> {
         }
     } else {
         println!("[SKIP] Initramfs already built (inputs unchanged)");
-        println!("  Delete output/initramfs-live.cpio.gz to force rebuild");
+        println!(
+            "  Delete {} to force rebuild",
+            output_dir
+                .join(distro_spec::acorn::INITRAMFS_LIVE_OUTPUT)
+                .display()
+        );
     }
     Ok(())
 }
@@ -651,17 +654,16 @@ fn cmd_initramfs() -> Result<()> {
 fn cmd_iso() -> Result<()> {
     let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let store = open_artifact_store(&base_dir);
+    let output_dir = distro_builder::artifact_store::central_output_dir_for_distro(&base_dir);
 
     // Ensure dependencies exist first
-    let rootfs = base_dir.join("output/filesystem.erofs");
-    let initramfs = base_dir.join("output/initramfs-live.cpio.gz");
+    let rootfs = output_dir.join(distro_spec::acorn::ROOTFS_NAME);
+    let initramfs = output_dir.join(distro_spec::acorn::INITRAMFS_LIVE_OUTPUT);
 
     if !rootfs.exists() {
         if let Some(store) = &store {
-            let key = base_dir.join("output/.rootfs-inputs.hash");
-            let out = base_dir
-                .join("output")
-                .join(distro_spec::acorn::ROOTFS_NAME);
+            let key = output_dir.join(".rootfs-inputs.hash");
+            let out = output_dir.join(distro_spec::acorn::ROOTFS_NAME);
             match distro_builder::artifact_store::try_restore_file_from_key(
                 store,
                 "rootfs_erofs",
@@ -684,10 +686,8 @@ fn cmd_iso() -> Result<()> {
     }
     if !initramfs.exists() {
         if let Some(store) = &store {
-            let key = base_dir.join("output/.initramfs-inputs.hash");
-            let out = base_dir
-                .join("output")
-                .join(distro_spec::acorn::INITRAMFS_LIVE_OUTPUT);
+            let key = output_dir.join(".initramfs-inputs.hash");
+            let out = output_dir.join(distro_spec::acorn::INITRAMFS_LIVE_OUTPUT);
             match distro_builder::artifact_store::try_restore_file_from_key(
                 store,
                 "initramfs",
@@ -713,7 +713,10 @@ fn cmd_iso() -> Result<()> {
         acornos::artifact::create_iso(&base_dir)?;
     } else {
         println!("[SKIP] ISO already built (components unchanged)");
-        println!("  Delete output/acornos.iso to force rebuild");
+        println!(
+            "  Delete {} to force rebuild",
+            output_dir.join(distro_spec::acorn::ISO_FILENAME).display()
+        );
     }
     Ok(())
 }
@@ -725,9 +728,8 @@ fn cmd_run() -> Result<()> {
 
 fn cmd_test(timeout: u64) -> Result<()> {
     let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let iso_path = base_dir
-        .join("output")
-        .join(distro_spec::acorn::ISO_FILENAME);
+    let output_dir = distro_builder::artifact_store::central_output_dir_for_distro(&base_dir);
+    let iso_path = output_dir.join(distro_spec::acorn::ISO_FILENAME);
     distro_builder::qemu::test_iso_boot(
         &iso_path,
         timeout,
@@ -827,12 +829,13 @@ fn cmd_download_tools() -> Result<()> {
     use distro_spec::shared::LEVITATE_CARGO_TOOLS;
 
     let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let output_dir = distro_builder::artifact_store::central_output_dir_for_distro(&base_dir);
 
     println!("Installing tools via recipes...\n");
     distro_builder::recipe::install_tools(&base_dir)?;
 
     // Show what was installed
-    let staging_bin = base_dir.join("output/staging/usr/bin");
+    let staging_bin = output_dir.join("staging/usr/bin");
     println!("\nTools installed:");
     for tool in LEVITATE_CARGO_TOOLS {
         let path = staging_bin.join(tool);
@@ -855,6 +858,7 @@ fn cmd_status() -> Result<()> {
 
     let config = AcornConfig;
     let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let output_dir = distro_builder::artifact_store::central_output_dir_for_distro(&base_dir);
     let paths = ExtractPaths::new(&base_dir);
 
     println!("AcornOS Builder Status");
@@ -909,19 +913,21 @@ fn cmd_status() -> Result<()> {
 
     // Check if we can steal kernel from LevitateOS
     let workspace_root = base_dir.parent().expect("AcornOS must be in workspace");
-    let leviso_bzimage = workspace_root.join("leviso/output/kernel-build/arch/x86/boot/bzImage");
+    let leviso_dir = workspace_root.join("leviso");
+    let leviso_output_dir =
+        distro_builder::artifact_store::central_output_dir_for_distro(&leviso_dir);
+    let leviso_bzimage = leviso_output_dir.join("kernel-build/arch/x86/boot/bzImage");
     if leviso_bzimage.exists() {
         println!("  LevitateOS:      KERNEL AVAILABLE (can steal instead of building)");
     }
     println!();
 
     // Check build artifacts
-    let output_dir = base_dir.join("output");
     let kernel = output_dir.join("staging/boot/vmlinuz");
     let kernel_build = output_dir.join("kernel-build");
     let rootfs = output_dir.join("filesystem.erofs");
     let initramfs = output_dir.join("initramfs-live.cpio.gz");
-    let iso = output_dir.join("acornos.iso");
+    let iso = output_dir.join(distro_spec::acorn::ISO_FILENAME);
 
     println!("Build Artifacts:");
     if kernel.exists() {

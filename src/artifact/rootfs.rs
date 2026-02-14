@@ -31,7 +31,7 @@ pub fn build_rootfs(base_dir: &Path) -> Result<()> {
     check_host_tools()?;
 
     let paths = ExtractPaths::new(base_dir);
-    let output_dir = base_dir.join("output");
+    let output_dir = distro_builder::artifact_store::central_output_dir_for_distro(base_dir);
 
     // Verify rootfs exists
     if !paths.rootfs.exists() || !paths.rootfs.join("bin").exists() {

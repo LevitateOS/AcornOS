@@ -26,7 +26,7 @@ use distro_spec::acorn::{
 
 /// Create ISO using reciso with systemd-boot + UKIs.
 pub fn create_iso(base_dir: &Path) -> Result<()> {
-    let output_dir = base_dir.join("output");
+    let output_dir = distro_builder::artifact_store::central_output_dir_for_distro(base_dir);
     let kernel = output_dir.join("staging/boot/vmlinuz");
     let initramfs = output_dir.join(INITRAMFS_LIVE_OUTPUT);
     let rootfs = output_dir.join(ROOTFS_NAME);

@@ -13,7 +13,7 @@ use distro_spec::acorn::{
 
 /// Run the ISO in QEMU GUI.
 pub fn run_iso(base_dir: &Path, disk_size: Option<String>) -> Result<()> {
-    let output_dir = base_dir.join("output");
+    let output_dir = distro_builder::artifact_store::central_output_dir_for_distro(base_dir);
     let iso_path = output_dir.join(ISO_FILENAME);
 
     if !iso_path.exists() {
@@ -36,7 +36,9 @@ pub fn run_iso(base_dir: &Path, disk_size: Option<String>) -> Result<()> {
     let mut builder = QemuBuilder::new(QEMU_CPU_MODE, QEMU_MEMORY_GB)
         .cdrom(iso_path.clone())
         .vga("virtio")
-        .serial_output(SerialOutput::File(QEMU_SERIAL_LOG.to_string()));
+        .serial_output(SerialOutput::File(
+            output_dir.join(QEMU_SERIAL_LOG).display().to_string(),
+        ));
 
     // Always include a virtual disk
     let size = disk_size.unwrap_or_else(|| format!("{}G", QEMU_DISK_GB));

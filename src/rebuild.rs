@@ -17,14 +17,15 @@ use distro_builder::cache;
 /// Checks if the kernel build artifacts exist and if inputs (kconfig) have changed.
 /// Theft from LevitateOS is handled by the recipe system, not here.
 pub fn kernel_needs_compile(base_dir: &Path) -> bool {
-    let our_bzimage = base_dir.join("output/kernel-build/arch/x86/boot/bzImage");
+    let output_dir = distro_builder::artifact_store::central_output_dir_for_distro(base_dir);
+    let our_bzimage = output_dir.join("kernel-build/arch/x86/boot/bzImage");
     if !our_bzimage.exists() {
         return true;
     }
 
     // Check if inputs changed (kconfig)
     let kconfig = base_dir.join("kconfig");
-    let hash_file = base_dir.join("output/.kernel-inputs.hash");
+    let hash_file = output_dir.join(".kernel-inputs.hash");
 
     let inputs: Vec<&Path> = vec![&kconfig];
 
@@ -38,8 +39,9 @@ pub fn kernel_needs_compile(base_dir: &Path) -> bool {
 
 /// Check if kernel needs to be installed (bzImage exists but vmlinuz doesn't).
 pub fn kernel_needs_install(base_dir: &Path) -> bool {
-    let bzimage = base_dir.join("output/kernel-build/arch/x86/boot/bzImage");
-    let vmlinuz = base_dir.join("output/staging/boot/vmlinuz");
+    let output_dir = distro_builder::artifact_store::central_output_dir_for_distro(base_dir);
+    let bzimage = output_dir.join("kernel-build/arch/x86/boot/bzImage");
+    let vmlinuz = output_dir.join("staging/boot/vmlinuz");
 
     if !bzimage.exists() {
         return false; // Can't install what doesn't exist
@@ -68,7 +70,8 @@ pub fn cache_kernel_hash(base_dir: &Path) {
     };
 
     if let Some(hash) = cache::hash_files(&inputs) {
-        let _ = cache::write_cached_hash(&base_dir.join("output/.kernel-inputs.hash"), &hash);
+        let output_dir = distro_builder::artifact_store::central_output_dir_for_distro(base_dir);
+        let _ = cache::write_cached_hash(&output_dir.join(".kernel-inputs.hash"), &hash);
     }
 }
 
@@ -76,8 +79,9 @@ pub fn cache_kernel_hash(base_dir: &Path) {
 ///
 /// Uses hash of key input files. Falls back to mtime if hash file missing.
 pub fn rootfs_needs_rebuild(base_dir: &Path) -> bool {
-    let rootfs = base_dir.join("output").join(ROOTFS_NAME);
-    let hash_file = base_dir.join("output/.rootfs-inputs.hash");
+    let output_dir = distro_builder::artifact_store::central_output_dir_for_distro(base_dir);
+    let rootfs = output_dir.join(ROOTFS_NAME);
+    let hash_file = output_dir.join(".rootfs-inputs.hash");
 
     if !rootfs.exists() {
         return true;
@@ -99,8 +103,9 @@ pub fn rootfs_needs_rebuild(base_dir: &Path) -> bool {
 
 /// Check if initramfs needs to be rebuilt.
 pub fn initramfs_needs_rebuild(base_dir: &Path) -> bool {
-    let initramfs = base_dir.join("output").join(INITRAMFS_LIVE_OUTPUT);
-    let hash_file = base_dir.join("output/.initramfs-inputs.hash");
+    let output_dir = distro_builder::artifact_store::central_output_dir_for_distro(base_dir);
+    let initramfs = output_dir.join(INITRAMFS_LIVE_OUTPUT);
+    let hash_file = output_dir.join(".initramfs-inputs.hash");
     let init_script = base_dir.join("profile/init_tiny.template");
     let busybox = base_dir.join("downloads/busybox-static");
     let initramfs_module = base_dir.join("src/artifact/initramfs.rs");
@@ -120,11 +125,12 @@ pub fn initramfs_needs_rebuild(base_dir: &Path) -> bool {
 
 /// Check if ISO needs to be rebuilt.
 pub fn iso_needs_rebuild(base_dir: &Path) -> bool {
-    let iso = base_dir.join("output").join(ISO_FILENAME);
-    let rootfs = base_dir.join("output").join(ROOTFS_NAME);
-    let initramfs = base_dir.join("output").join(INITRAMFS_LIVE_OUTPUT);
+    let output_dir = distro_builder::artifact_store::central_output_dir_for_distro(base_dir);
+    let iso = output_dir.join(ISO_FILENAME);
+    let rootfs = output_dir.join(ROOTFS_NAME);
+    let initramfs = output_dir.join(INITRAMFS_LIVE_OUTPUT);
     // AcornOS builds its own kernel (same as LevitateOS)
-    let kernel = base_dir.join("output/staging/boot/vmlinuz");
+    let kernel = output_dir.join("staging/boot/vmlinuz");
 
     if !iso.exists() {
         return true;
@@ -146,7 +152,8 @@ pub fn cache_rootfs_hash(base_dir: &Path) {
 
     let inputs: Vec<&Path> = vec![&rootfs_marker, &rootfs_builder];
     if let Some(hash) = cache::hash_files(&inputs) {
-        let _ = cache::write_cached_hash(&base_dir.join("output/.rootfs-inputs.hash"), &hash);
+        let output_dir = distro_builder::artifact_store::central_output_dir_for_distro(base_dir);
+        let _ = cache::write_cached_hash(&output_dir.join(".rootfs-inputs.hash"), &hash);
     }
 }
 
@@ -158,6 +165,7 @@ pub fn cache_initramfs_hash(base_dir: &Path) {
 
     let inputs: Vec<&Path> = vec![&init_script, &busybox, &initramfs_module];
     if let Some(hash) = cache::hash_files(&inputs) {
-        let _ = cache::write_cached_hash(&base_dir.join("output/.initramfs-inputs.hash"), &hash);
+        let output_dir = distro_builder::artifact_store::central_output_dir_for_distro(base_dir);
+        let _ = cache::write_cached_hash(&output_dir.join(".initramfs-inputs.hash"), &hash);
     }
 }

@@ -28,14 +28,14 @@ use recinit::{download_and_cache_busybox, find_kernel_modules_dir, ModulePreset,
 
 /// Build the tiny initramfs using recinit.
 pub fn build_tiny_initramfs(base_dir: &Path) -> Result<()> {
-    let output_dir = base_dir.join("output");
+    let output_dir = distro_builder::artifact_store::central_output_dir_for_distro(base_dir);
 
     // Download/cache busybox
     let downloads_dir = base_dir.join("downloads");
     let busybox_path = download_and_cache_busybox(&downloads_dir)?;
 
     // Find kernel modules directory
-    let modules_base = base_dir.join("output/staging/lib/modules");
+    let modules_base = output_dir.join("staging/lib/modules");
     let modules_dir = find_kernel_modules_dir(&modules_base)?;
 
     let output_path = output_dir.join(INITRAMFS_LIVE_OUTPUT);
