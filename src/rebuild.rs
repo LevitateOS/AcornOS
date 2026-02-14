@@ -86,9 +86,9 @@ pub fn rootfs_needs_rebuild(base_dir: &Path) -> bool {
     // Key files that affect rootfs content
     // For AcornOS, the rootfs comes from Alpine package extraction
     let rootfs_marker = base_dir.join("downloads/rootfs/bin/busybox");
-    let extract_module = base_dir.join("src/extract.rs");
+    let rootfs_builder = base_dir.join("src/artifact/rootfs.rs");
 
-    let inputs: Vec<&Path> = vec![&rootfs_marker, &extract_module];
+    let inputs: Vec<&Path> = vec![&rootfs_marker, &rootfs_builder];
     let current_hash = match cache::hash_files(&inputs) {
         Some(h) => h,
         None => return true,
@@ -142,9 +142,9 @@ pub fn iso_needs_rebuild(base_dir: &Path) -> bool {
 /// Cache the rootfs input hash after a successful build.
 pub fn cache_rootfs_hash(base_dir: &Path) {
     let rootfs_marker = base_dir.join("downloads/rootfs/bin/busybox");
-    let extract_module = base_dir.join("src/extract.rs");
+    let rootfs_builder = base_dir.join("src/artifact/rootfs.rs");
 
-    let inputs: Vec<&Path> = vec![&rootfs_marker, &extract_module];
+    let inputs: Vec<&Path> = vec![&rootfs_marker, &rootfs_builder];
     if let Some(hash) = cache::hash_files(&inputs) {
         let _ = cache::write_cached_hash(&base_dir.join("output/.rootfs-inputs.hash"), &hash);
     }

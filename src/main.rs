@@ -42,6 +42,18 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
+fn open_artifact_store(
+    base_dir: &std::path::Path,
+) -> Option<distro_builder::artifact_store::ArtifactStore> {
+    match distro_builder::artifact_store::ArtifactStore::open_for_distro(base_dir) {
+        Ok(s) => Some(s),
+        Err(e) => {
+            eprintln!("[WARN] Artifact store disabled: {:#}", e);
+            None
+        }
+    }
+}
+
 #[derive(Parser)]
 #[command(name = "acornos")]
 #[command(author, version, about = "AcornOS ISO builder", long_about = None)]
@@ -178,10 +190,30 @@ fn main() {
 /// Resolve kernel via recipe: handles download, theft from leviso, build, and install.
 /// Returns Ok if kernel is available in staging after this call.
 fn resolve_kernel(base_dir: &std::path::Path) -> Result<()> {
-    let vmlinuz = base_dir.join("output/staging/boot/vmlinuz");
+    let store = open_artifact_store(base_dir);
+    let staging = base_dir.join("output/staging");
+    let vmlinuz = staging.join("boot/vmlinuz");
     if vmlinuz.exists() {
         println!("[SKIP] Kernel already built and installed");
         return Ok(());
+    }
+
+    // Try to restore from the centralized artifact store first (no compilation).
+    if let Some(store) = &store {
+        let key = base_dir.join("output/.kernel-inputs.hash");
+        match distro_builder::artifact_store::try_restore_kernel_payload_from_key(
+            store, &key, &staging,
+        ) {
+            Ok(true) => {
+                println!("[RESTORE] Kernel payload restored from artifact store");
+                return Ok(());
+            }
+            Ok(false) => {}
+            Err(e) => eprintln!(
+                "[WARN] Failed to restore kernel payload from artifact store: {:#}",
+                e
+            ),
+        }
     }
 
     // Run the recipe — it handles theft from leviso internally
@@ -200,6 +232,25 @@ fn resolve_kernel(base_dir: &std::path::Path) -> Result<()> {
         );
     }
 
+    // Cache the kernel input hash (even in theft mode) so we have a stable key.
+    acornos::rebuild::cache_kernel_hash(base_dir);
+
+    // Store the kernel payload (vmlinuz + modules) for fast restore later.
+    if let Some(store) = &store {
+        let key = base_dir.join("output/.kernel-inputs.hash");
+        if let Err(e) = distro_builder::artifact_store::try_store_kernel_payload_from_key(
+            store,
+            &key,
+            &staging,
+            std::collections::BTreeMap::new(),
+        ) {
+            eprintln!(
+                "[WARN] Failed to store kernel payload in artifact store: {:#}",
+                e
+            );
+        }
+    }
+
     Ok(())
 }
 
@@ -208,6 +259,7 @@ fn cmd_build() -> Result<()> {
     use std::time::Instant;
 
     let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let store = open_artifact_store(&base_dir);
     let build_start = Instant::now();
 
     println!("=== Full AcornOS Build ===\n");
@@ -215,12 +267,67 @@ fn cmd_build() -> Result<()> {
     // 1. Resolve kernel (use existing or steal — never build without explicit flag)
     resolve_kernel(&base_dir)?;
 
+    // Try to restore build outputs from the centralized artifact store if the
+    // output files are missing but input hashes are known.
+    if let Some(store) = &store {
+        let rootfs_key = base_dir.join("output/.rootfs-inputs.hash");
+        let rootfs_out = base_dir
+            .join("output")
+            .join(distro_spec::acorn::ROOTFS_NAME);
+        match distro_builder::artifact_store::try_restore_file_from_key(
+            store,
+            "rootfs_erofs",
+            &rootfs_key,
+            &rootfs_out,
+        ) {
+            Ok(true) => println!("\n[RESTORE] Rootfs restored from artifact store"),
+            Ok(false) => {}
+            Err(e) => eprintln!(
+                "[WARN] Failed to restore rootfs from artifact store: {:#}",
+                e
+            ),
+        }
+
+        let initramfs_key = base_dir.join("output/.initramfs-inputs.hash");
+        let initramfs_out = base_dir
+            .join("output")
+            .join(distro_spec::acorn::INITRAMFS_LIVE_OUTPUT);
+        match distro_builder::artifact_store::try_restore_file_from_key(
+            store,
+            "initramfs",
+            &initramfs_key,
+            &initramfs_out,
+        ) {
+            Ok(true) => println!("\n[RESTORE] Initramfs restored from artifact store"),
+            Ok(false) => {}
+            Err(e) => eprintln!(
+                "[WARN] Failed to restore initramfs from artifact store: {:#}",
+                e
+            ),
+        }
+    }
+
     // 2. Build EROFS rootfs (skip if inputs unchanged)
     if acornos::rebuild::rootfs_needs_rebuild(&base_dir) {
         println!("\nBuilding EROFS system image...");
         let t = Timer::start("EROFS");
         acornos::artifact::build_rootfs(&base_dir)?;
         acornos::rebuild::cache_rootfs_hash(&base_dir);
+        if let Some(store) = &store {
+            let key = base_dir.join("output/.rootfs-inputs.hash");
+            let out = base_dir
+                .join("output")
+                .join(distro_spec::acorn::ROOTFS_NAME);
+            if let Err(e) = distro_builder::artifact_store::try_store_file_from_key(
+                store,
+                "rootfs_erofs",
+                &key,
+                &out,
+                std::collections::BTreeMap::new(),
+            ) {
+                eprintln!("[WARN] Failed to store rootfs in artifact store: {:#}", e);
+            }
+        }
         t.finish();
     } else {
         println!("\n[SKIP] EROFS rootfs already built (inputs unchanged)");
@@ -232,6 +339,24 @@ fn cmd_build() -> Result<()> {
         let t = Timer::start("Initramfs");
         acornos::artifact::build_tiny_initramfs(&base_dir)?;
         acornos::rebuild::cache_initramfs_hash(&base_dir);
+        if let Some(store) = &store {
+            let key = base_dir.join("output/.initramfs-inputs.hash");
+            let out = base_dir
+                .join("output")
+                .join(distro_spec::acorn::INITRAMFS_LIVE_OUTPUT);
+            if let Err(e) = distro_builder::artifact_store::try_store_file_from_key(
+                store,
+                "initramfs",
+                &key,
+                &out,
+                std::collections::BTreeMap::new(),
+            ) {
+                eprintln!(
+                    "[WARN] Failed to store initramfs in artifact store: {:#}",
+                    e
+                );
+            }
+        }
         t.finish();
     } else {
         println!("\n[SKIP] Initramfs already built (inputs unchanged)");
@@ -264,6 +389,7 @@ fn cmd_build_with_kernel() -> Result<()> {
     use std::time::Instant;
 
     let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let store = open_artifact_store(&base_dir);
     let build_start = Instant::now();
 
     println!("=== Full AcornOS Build (with kernel) ===\n");
@@ -275,6 +401,21 @@ fn cmd_build_with_kernel() -> Result<()> {
         let t = Timer::start("Kernel");
         distro_builder::recipe::linux::linux(&base_dir, &distro_spec::acorn::KERNEL_SOURCE)?;
         acornos::rebuild::cache_kernel_hash(&base_dir);
+        if let Some(store) = &store {
+            let key = base_dir.join("output/.kernel-inputs.hash");
+            let staging = base_dir.join("output/staging");
+            if let Err(e) = distro_builder::artifact_store::try_store_kernel_payload_from_key(
+                store,
+                &key,
+                &staging,
+                std::collections::BTreeMap::new(),
+            ) {
+                eprintln!(
+                    "[WARN] Failed to store kernel payload in artifact store: {:#}",
+                    e
+                );
+            }
+        }
         t.finish();
     } else {
         println!("[SKIP] Kernel already built and installed");
@@ -286,6 +427,21 @@ fn cmd_build_with_kernel() -> Result<()> {
         let t = Timer::start("EROFS");
         acornos::artifact::build_rootfs(&base_dir)?;
         acornos::rebuild::cache_rootfs_hash(&base_dir);
+        if let Some(store) = &store {
+            let key = base_dir.join("output/.rootfs-inputs.hash");
+            let out = base_dir
+                .join("output")
+                .join(distro_spec::acorn::ROOTFS_NAME);
+            if let Err(e) = distro_builder::artifact_store::try_store_file_from_key(
+                store,
+                "rootfs_erofs",
+                &key,
+                &out,
+                std::collections::BTreeMap::new(),
+            ) {
+                eprintln!("[WARN] Failed to store rootfs in artifact store: {:#}", e);
+            }
+        }
         t.finish();
     } else {
         println!("\n[SKIP] EROFS rootfs already built (inputs unchanged)");
@@ -296,6 +452,24 @@ fn cmd_build_with_kernel() -> Result<()> {
         let t = Timer::start("Initramfs");
         acornos::artifact::build_tiny_initramfs(&base_dir)?;
         acornos::rebuild::cache_initramfs_hash(&base_dir);
+        if let Some(store) = &store {
+            let key = base_dir.join("output/.initramfs-inputs.hash");
+            let out = base_dir
+                .join("output")
+                .join(distro_spec::acorn::INITRAMFS_LIVE_OUTPUT);
+            if let Err(e) = distro_builder::artifact_store::try_store_file_from_key(
+                store,
+                "initramfs",
+                &key,
+                &out,
+                std::collections::BTreeMap::new(),
+            ) {
+                eprintln!(
+                    "[WARN] Failed to store initramfs in artifact store: {:#}",
+                    e
+                );
+            }
+        }
         t.finish();
     } else {
         println!("\n[SKIP] Initramfs already built (inputs unchanged)");
@@ -326,6 +500,7 @@ fn cmd_build_kernel(clean: bool) -> Result<()> {
     use distro_builder::timing::Timer;
 
     let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let store = open_artifact_store(&base_dir);
 
     if clean {
         let kernel_build = base_dir.join("output/kernel-build");
@@ -344,6 +519,21 @@ fn cmd_build_kernel(clean: bool) -> Result<()> {
         let linux =
             distro_builder::recipe::linux::linux(&base_dir, &distro_spec::acorn::KERNEL_SOURCE)?;
         acornos::rebuild::cache_kernel_hash(&base_dir);
+        if let Some(store) = &store {
+            let key = base_dir.join("output/.kernel-inputs.hash");
+            let staging = base_dir.join("output/staging");
+            if let Err(e) = distro_builder::artifact_store::try_store_kernel_payload_from_key(
+                store,
+                &key,
+                &staging,
+                std::collections::BTreeMap::new(),
+            ) {
+                eprintln!(
+                    "[WARN] Failed to store kernel payload in artifact store: {:#}",
+                    e
+                );
+            }
+        }
         t.finish();
 
         println!("\n=== Kernel build complete ===");
@@ -359,10 +549,46 @@ fn cmd_build_kernel(clean: bool) -> Result<()> {
 
 fn cmd_build_rootfs() -> Result<()> {
     let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let store = open_artifact_store(&base_dir);
+
+    if let Some(store) = &store {
+        let key = base_dir.join("output/.rootfs-inputs.hash");
+        let out = base_dir
+            .join("output")
+            .join(distro_spec::acorn::ROOTFS_NAME);
+        match distro_builder::artifact_store::try_restore_file_from_key(
+            store,
+            "rootfs_erofs",
+            &key,
+            &out,
+        ) {
+            Ok(true) => println!("[RESTORE] Rootfs restored from artifact store"),
+            Ok(false) => {}
+            Err(e) => eprintln!(
+                "[WARN] Failed to restore rootfs from artifact store: {:#}",
+                e
+            ),
+        }
+    }
 
     if acornos::rebuild::rootfs_needs_rebuild(&base_dir) {
         acornos::artifact::build_rootfs(&base_dir)?;
         acornos::rebuild::cache_rootfs_hash(&base_dir);
+        if let Some(store) = &store {
+            let key = base_dir.join("output/.rootfs-inputs.hash");
+            let out = base_dir
+                .join("output")
+                .join(distro_spec::acorn::ROOTFS_NAME);
+            if let Err(e) = distro_builder::artifact_store::try_store_file_from_key(
+                store,
+                "rootfs_erofs",
+                &key,
+                &out,
+                std::collections::BTreeMap::new(),
+            ) {
+                eprintln!("[WARN] Failed to store rootfs in artifact store: {:#}", e);
+            }
+        }
     } else {
         println!("[SKIP] EROFS rootfs already built (inputs unchanged)");
         println!("  Delete output/filesystem.erofs to force rebuild");
@@ -372,10 +598,49 @@ fn cmd_build_rootfs() -> Result<()> {
 
 fn cmd_initramfs() -> Result<()> {
     let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let store = open_artifact_store(&base_dir);
+
+    if let Some(store) = &store {
+        let key = base_dir.join("output/.initramfs-inputs.hash");
+        let out = base_dir
+            .join("output")
+            .join(distro_spec::acorn::INITRAMFS_LIVE_OUTPUT);
+        match distro_builder::artifact_store::try_restore_file_from_key(
+            store,
+            "initramfs",
+            &key,
+            &out,
+        ) {
+            Ok(true) => println!("[RESTORE] Initramfs restored from artifact store"),
+            Ok(false) => {}
+            Err(e) => eprintln!(
+                "[WARN] Failed to restore initramfs from artifact store: {:#}",
+                e
+            ),
+        }
+    }
 
     if acornos::rebuild::initramfs_needs_rebuild(&base_dir) {
         acornos::artifact::build_tiny_initramfs(&base_dir)?;
         acornos::rebuild::cache_initramfs_hash(&base_dir);
+        if let Some(store) = &store {
+            let key = base_dir.join("output/.initramfs-inputs.hash");
+            let out = base_dir
+                .join("output")
+                .join(distro_spec::acorn::INITRAMFS_LIVE_OUTPUT);
+            if let Err(e) = distro_builder::artifact_store::try_store_file_from_key(
+                store,
+                "initramfs",
+                &key,
+                &out,
+                std::collections::BTreeMap::new(),
+            ) {
+                eprintln!(
+                    "[WARN] Failed to store initramfs in artifact store: {:#}",
+                    e
+                );
+            }
+        }
     } else {
         println!("[SKIP] Initramfs already built (inputs unchanged)");
         println!("  Delete output/initramfs-live.cpio.gz to force rebuild");
@@ -385,20 +650,63 @@ fn cmd_initramfs() -> Result<()> {
 
 fn cmd_iso() -> Result<()> {
     let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let store = open_artifact_store(&base_dir);
 
     // Ensure dependencies exist first
     let rootfs = base_dir.join("output/filesystem.erofs");
     let initramfs = base_dir.join("output/initramfs-live.cpio.gz");
 
     if !rootfs.exists() {
-        println!("EROFS rootfs not found, building...");
-        acornos::artifact::build_rootfs(&base_dir)?;
-        acornos::rebuild::cache_rootfs_hash(&base_dir);
+        if let Some(store) = &store {
+            let key = base_dir.join("output/.rootfs-inputs.hash");
+            let out = base_dir
+                .join("output")
+                .join(distro_spec::acorn::ROOTFS_NAME);
+            match distro_builder::artifact_store::try_restore_file_from_key(
+                store,
+                "rootfs_erofs",
+                &key,
+                &out,
+            ) {
+                Ok(true) => println!("EROFS rootfs restored from artifact store."),
+                Ok(false) => {}
+                Err(e) => eprintln!(
+                    "[WARN] Failed to restore rootfs from artifact store: {:#}",
+                    e
+                ),
+            }
+        }
+        if !rootfs.exists() {
+            println!("EROFS rootfs not found, building...");
+            acornos::artifact::build_rootfs(&base_dir)?;
+            acornos::rebuild::cache_rootfs_hash(&base_dir);
+        }
     }
     if !initramfs.exists() {
-        println!("Initramfs not found, building...");
-        acornos::artifact::build_tiny_initramfs(&base_dir)?;
-        acornos::rebuild::cache_initramfs_hash(&base_dir);
+        if let Some(store) = &store {
+            let key = base_dir.join("output/.initramfs-inputs.hash");
+            let out = base_dir
+                .join("output")
+                .join(distro_spec::acorn::INITRAMFS_LIVE_OUTPUT);
+            match distro_builder::artifact_store::try_restore_file_from_key(
+                store,
+                "initramfs",
+                &key,
+                &out,
+            ) {
+                Ok(true) => println!("Initramfs restored from artifact store."),
+                Ok(false) => {}
+                Err(e) => eprintln!(
+                    "[WARN] Failed to restore initramfs from artifact store: {:#}",
+                    e
+                ),
+            }
+        }
+        if !initramfs.exists() {
+            println!("Initramfs not found, building...");
+            acornos::artifact::build_tiny_initramfs(&base_dir)?;
+            acornos::rebuild::cache_initramfs_hash(&base_dir);
+        }
     }
 
     if acornos::rebuild::iso_needs_rebuild(&base_dir) {
