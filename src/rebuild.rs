@@ -3,8 +3,7 @@
 //! Uses hash-based caching to skip rebuilding artifacts that haven't changed.
 //! This provides faster incremental builds by detecting when inputs change.
 //!
-//! Kernel theft from LevitateOS is handled by the recipe system (deps/linux.rhai),
-//! not by the rebuild detection logic.
+//! Kernel compilation is centralized in xtask; this crate only consumes existing artifacts.
 
 use std::path::Path;
 
@@ -15,7 +14,6 @@ use distro_builder::cache;
 /// Check if kernel needs to be compiled.
 ///
 /// Checks if the kernel build artifacts exist and if inputs (kconfig) have changed.
-/// Theft from LevitateOS is handled by the recipe system, not here.
 pub fn kernel_needs_compile(base_dir: &Path) -> bool {
     let output_dir = distro_builder::artifact_store::central_output_dir_for_distro(base_dir);
     let our_bzimage = output_dir.join("kernel-build/arch/x86/boot/bzImage");

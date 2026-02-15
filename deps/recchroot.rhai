@@ -113,7 +113,7 @@ fn install(ctx) {
 
 // === CLEANUP ===
 
-fn cleanup(ctx) {
+fn cleanup(ctx, reason) {
     ctx
 }
 

@@ -268,18 +268,36 @@ fn install(ctx) {
 
 // === CLEANUP ===
 
-fn cleanup(ctx) {
+fn cleanup(ctx, reason) {
     let version_file = join_path(BUILD_DIR, ".packages-version");
     let manifest_file = join_path(BUILD_DIR, ".packages-manifest");
     let install_marker = join_path(BUILD_DIR, ".packages-installed");
 
-    log("Cleaning packages state files...");
+    // Automatic cleanup runs during install, so it must not delete state markers
+    // on success (they gate incremental builds). Use reason to decide.
 
-    if is_file(version_file) { rm(version_file); }
-    if is_file(manifest_file) { rm(manifest_file); }
-    if is_file(install_marker) { rm(install_marker); }
+    if reason == "manual" {
+        log("Cleaning packages state files...");
+        if is_file(version_file) { rm(version_file); }
+        if is_file(manifest_file) { rm(manifest_file); }
+        if is_file(install_marker) { rm(install_marker); }
+        log("Cleanup complete (rootfs not touched - run alpine cleanup for that)");
+        return ctx;
+    }
 
-    log("Cleanup complete (rootfs not touched - run alpine cleanup for that)");
+    // Failure hygiene: remove potentially partial/stale state markers.
+    if reason == "auto.build.failure" {
+        if is_file(version_file) { rm(version_file); }
+        if is_file(manifest_file) { rm(manifest_file); }
+        return ctx;
+    }
+
+    if reason == "auto.install.failure" {
+        if is_file(install_marker) { rm(install_marker); }
+        return ctx;
+    }
+
+    // Success cases: keep state for caching.
     ctx
 }
 

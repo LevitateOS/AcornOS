@@ -292,23 +292,47 @@ fn install(ctx) {
 
 // === CLEANUP ===
 
-fn cleanup(ctx) {
+fn cleanup(ctx, reason) {
     let iso_contents = join_path(BUILD_DIR, "iso-contents");
     let rootfs_temp = join_path(BUILD_DIR, "rootfs");
     let apk_tools_dir = join_path(BUILD_DIR, "apk-tools");
     let version_file = join_path(BUILD_DIR, ".alpine-built-version");
+    let iso_dest = join_path(BUILD_DIR, ctx.iso_name);
 
-    log("Cleaning up...");
-    if is_dir(iso_contents) { rm(iso_contents); }
-    if is_dir(rootfs_temp) { rm(rootfs_temp); }
-    if is_dir(apk_tools_dir) { rm(apk_tools_dir); }
-    if ctx.iso_path != "" && is_file(ctx.iso_path) {
-        rm(ctx.iso_path);
+    // IMPORTANT:
+    // This recipe is typically executed with BUILD_DIR = <distro>/downloads (persistent cache).
+    // Automatic cleanup must NOT delete "installed" artifacts on success (rootfs/ISO),
+    // or it will break downstream builds.
+
+    // Manual cleanup: full reset.
+    if reason == "manual" {
+        log("Cleaning up...");
+        if is_dir(iso_contents) { rm(iso_contents); }
+        if is_dir(rootfs_temp) { rm(rootfs_temp); }
+        if is_dir(apk_tools_dir) { rm(apk_tools_dir); }
+        if is_file(iso_dest) { rm(iso_dest); }
+        if is_file(version_file) { rm(version_file); }
         ctx.iso_path = "";
+        ctx.apk_static_path = "";
+        log("Cleanup complete");
+        return ctx;
     }
-    if is_file(version_file) { rm(version_file); }
-    ctx.apk_static_path = "";
-    log("Cleanup complete");
+
+    // Build succeeded: ISO contents are no longer needed after rootfs was created.
+    if reason == "auto.build.success" {
+        if is_dir(iso_contents) { rm(iso_contents); }
+        return ctx;
+    }
+
+    // Failure hygiene: remove partial build outputs (keep downloaded ISO + apk-tools cache).
+    if reason == "auto.acquire.failure" || reason == "auto.build.failure" || reason == "auto.install.failure" {
+        if is_dir(iso_contents) { rm(iso_contents); }
+        if is_dir(rootfs_temp) { rm(rootfs_temp); }
+        if is_file(version_file) { rm(version_file); }
+        return ctx;
+    }
+
+    // Success cases: keep cached artifacts.
     ctx
 }
 

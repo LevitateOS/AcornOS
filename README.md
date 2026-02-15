@@ -51,7 +51,7 @@ cargo run -- preflight
 # Download Alpine ISO + apk-tools, install package tiers
 cargo run -- download alpine
 
-# Build (kernel may be reused/stolen; full kernel build requires explicit confirmation)
+# Build (kernel must already be built via xtask)
 cargo run -- build
 
 # Boot in QEMU

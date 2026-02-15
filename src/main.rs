@@ -74,14 +74,6 @@ enum Commands {
     Build {
         #[command(subcommand)]
         artifact: Option<BuildArtifact>,
-
-        /// Build the kernel from source (~1 hour). Requires --dangerously-waste-the-users-time.
-        #[arg(long)]
-        kernel: bool,
-
-        /// Confirm that you really want to spend ~1 hour building the kernel.
-        #[arg(long)]
-        dangerously_waste_the_users_time: bool,
     },
 
     /// Rebuild only the initramfs
@@ -111,8 +103,6 @@ enum Commands {
 enum DownloadTarget {
     /// Download Alpine Extended ISO and apk-tools
     Alpine,
-    /// Download Linux kernel source
-    Linux,
     /// Download installation tools (recstrap, recfstab, recchroot)
     Tools,
     /// Download everything
@@ -121,12 +111,6 @@ enum DownloadTarget {
 
 #[derive(Subcommand)]
 enum BuildArtifact {
-    /// Build the kernel from source
-    Kernel {
-        /// Clean build directory before building
-        #[arg(long)]
-        clean: bool,
-    },
     /// Build only the EROFS rootfs image
     Rootfs,
 }
@@ -137,42 +121,13 @@ fn main() {
     let result = match cli.command {
         Commands::Download { what } => match what {
             Some(DownloadTarget::Alpine) => cmd_download_alpine(),
-            Some(DownloadTarget::Linux) => cmd_download_linux(),
             Some(DownloadTarget::Tools) => cmd_download_tools(),
             Some(DownloadTarget::All) | None => cmd_download_all(),
         },
-        Commands::Build {
-            artifact,
-            kernel,
-            dangerously_waste_the_users_time,
-        } => {
-            use distro_contract::kernel::{KernelBuildGuard, KernelGuard};
-            match artifact {
-                Some(BuildArtifact::Kernel { clean }) => {
-                    KernelGuard::new(
-                        true,
-                        dangerously_waste_the_users_time,
-                        "cargo run -- build kernel --dangerously-waste-the-users-time",
-                    )
-                    .require_kernel_confirmation();
-                    cmd_build_kernel(clean)
-                }
-                Some(BuildArtifact::Rootfs) => cmd_build_rootfs(),
-                None => {
-                    if kernel {
-                        KernelGuard::new(
-                            true,
-                            dangerously_waste_the_users_time,
-                            "cargo run -- build --kernel --dangerously-waste-the-users-time",
-                        )
-                        .require_kernel_confirmation();
-                        cmd_build_with_kernel()
-                    } else {
-                        cmd_build()
-                    }
-                }
-            }
-        }
+        Commands::Build { artifact } => match artifact {
+            Some(BuildArtifact::Rootfs) => cmd_build_rootfs(),
+            None => cmd_build(),
+        },
         Commands::Initramfs => cmd_initramfs(),
         Commands::Iso => cmd_iso(),
         Commands::Run => cmd_run(),
@@ -187,8 +142,10 @@ fn main() {
     }
 }
 
-/// Resolve kernel via recipe: handles download, theft from leviso, build, and install.
-/// Returns Ok if kernel is available in staging after this call.
+/// Resolve kernel from existing artifacts or the centralized artifact store.
+///
+/// Kernel compilation is centralized in `cargo xtask kernels build acorn` (nightly policy).
+/// This distro builder should never compile kernels implicitly.
 fn resolve_kernel(base_dir: &std::path::Path) -> Result<()> {
     let store = open_artifact_store(base_dir);
     let output_dir = distro_builder::artifact_store::central_output_dir_for_distro(base_dir);
@@ -217,46 +174,12 @@ fn resolve_kernel(base_dir: &std::path::Path) -> Result<()> {
         }
     }
 
-    // Run the recipe — it handles theft from leviso internally
-    println!("Resolving kernel via recipe...");
-    let linux = distro_builder::recipe::linux::linux(
-        base_dir,
-        &distro_spec::acorn::KERNEL_SOURCE,
-        distro_spec::acorn::MODULE_INSTALL_PATH,
-    )?;
-
-    if !linux.vmlinuz.exists() {
-        anyhow::bail!(
-            "No kernel available!\n\n\
-             Options:\n\
-             1. Build LevitateOS first (leviso build) — AcornOS can steal its kernel\n\
-             2. Build AcornOS kernel:  cargo run -- build --kernel --dangerously-waste-the-users-time\n\
-             3. Build kernel only:     cargo run -- build kernel --dangerously-waste-the-users-time\n\n\
-             Kernel source will be downloaded automatically from cdn.kernel.org (v{}).",
-            distro_spec::acorn::KERNEL_SOURCE.version
-        );
-    }
-
-    // Cache the kernel input hash (even in theft mode) so we have a stable key.
-    acornos::rebuild::cache_kernel_hash(base_dir);
-
-    // Store the kernel payload (vmlinuz + modules) for fast restore later.
-    if let Some(store) = &store {
-        let key = output_dir.join(".kernel-inputs.hash");
-        if let Err(e) = distro_builder::artifact_store::try_store_kernel_payload_from_key(
-            store,
-            &key,
-            &staging,
-            std::collections::BTreeMap::new(),
-        ) {
-            eprintln!(
-                "[WARN] Failed to store kernel payload in artifact store: {:#}",
-                e
-            );
-        }
-    }
-
-    Ok(())
+    anyhow::bail!(
+        "No kernel available.\n\n\
+         Kernel compilation is centralized in xtask (nightly build-hours policy).\n\
+         Build the kernels first, then re-run this command:\n\
+           cargo xtask kernels build acorn"
+    )
 }
 
 fn cmd_build() -> Result<()> {
@@ -270,7 +193,7 @@ fn cmd_build() -> Result<()> {
 
     println!("=== Full AcornOS Build ===\n");
 
-    // 1. Resolve kernel (use existing or steal — never build without explicit flag)
+    // 1. Resolve kernel (must already be built via xtask)
     resolve_kernel(&base_dir)?;
 
     // Try to restore build outputs from the centralized artifact store if the
@@ -381,180 +304,6 @@ fn cmd_build() -> Result<()> {
         output_dir.join(distro_spec::acorn::ISO_FILENAME).display()
     );
     println!("\nNext: acornos run");
-
-    Ok(())
-}
-
-fn cmd_build_with_kernel() -> Result<()> {
-    use distro_builder::timing::Timer;
-    use std::time::Instant;
-
-    let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let store = open_artifact_store(&base_dir);
-    let output_dir = distro_builder::artifact_store::central_output_dir_for_distro(&base_dir);
-    let build_start = Instant::now();
-
-    println!("=== Full AcornOS Build (with kernel) ===\n");
-
-    // Build kernel via recipe (handles download + build + install)
-    let needs_compile = acornos::rebuild::kernel_needs_compile(&base_dir);
-    if needs_compile {
-        println!("Building kernel from source (~1 hour)...");
-        let t = Timer::start("Kernel");
-        distro_builder::recipe::linux::linux(
-            &base_dir,
-            &distro_spec::acorn::KERNEL_SOURCE,
-            distro_spec::acorn::MODULE_INSTALL_PATH,
-        )?;
-        acornos::rebuild::cache_kernel_hash(&base_dir);
-        if let Some(store) = &store {
-            let key = output_dir.join(".kernel-inputs.hash");
-            let staging = output_dir.join("staging");
-            if let Err(e) = distro_builder::artifact_store::try_store_kernel_payload_from_key(
-                store,
-                &key,
-                &staging,
-                std::collections::BTreeMap::new(),
-            ) {
-                eprintln!(
-                    "[WARN] Failed to store kernel payload in artifact store: {:#}",
-                    e
-                );
-            }
-        }
-        t.finish();
-    } else {
-        println!("[SKIP] Kernel already built and installed");
-    }
-
-    // Continue with rest of build
-    if acornos::rebuild::rootfs_needs_rebuild(&base_dir) {
-        println!("\nBuilding EROFS system image...");
-        let t = Timer::start("EROFS");
-        acornos::artifact::build_rootfs(&base_dir)?;
-        acornos::rebuild::cache_rootfs_hash(&base_dir);
-        if let Some(store) = &store {
-            let key = output_dir.join(".rootfs-inputs.hash");
-            let out = output_dir.join(distro_spec::acorn::ROOTFS_NAME);
-            if let Err(e) = distro_builder::artifact_store::try_store_file_from_key(
-                store,
-                "rootfs_erofs",
-                &key,
-                &out,
-                std::collections::BTreeMap::new(),
-            ) {
-                eprintln!("[WARN] Failed to store rootfs in artifact store: {:#}", e);
-            }
-        }
-        t.finish();
-    } else {
-        println!("\n[SKIP] EROFS rootfs already built (inputs unchanged)");
-    }
-
-    if acornos::rebuild::initramfs_needs_rebuild(&base_dir) {
-        println!("\nBuilding tiny initramfs...");
-        let t = Timer::start("Initramfs");
-        acornos::artifact::build_tiny_initramfs(&base_dir)?;
-        acornos::rebuild::cache_initramfs_hash(&base_dir);
-        if let Some(store) = &store {
-            let key = output_dir.join(".initramfs-inputs.hash");
-            let out = output_dir.join(distro_spec::acorn::INITRAMFS_LIVE_OUTPUT);
-            if let Err(e) = distro_builder::artifact_store::try_store_file_from_key(
-                store,
-                "initramfs",
-                &key,
-                &out,
-                std::collections::BTreeMap::new(),
-            ) {
-                eprintln!(
-                    "[WARN] Failed to store initramfs in artifact store: {:#}",
-                    e
-                );
-            }
-        }
-        t.finish();
-    } else {
-        println!("\n[SKIP] Initramfs already built (inputs unchanged)");
-    }
-
-    if acornos::rebuild::iso_needs_rebuild(&base_dir) {
-        println!("\nBuilding ISO...");
-        let t = Timer::start("ISO");
-        acornos::artifact::create_iso(&base_dir)?;
-        t.finish();
-    } else {
-        println!("\n[SKIP] ISO already built (components unchanged)");
-    }
-
-    let total = build_start.elapsed().as_secs_f64();
-    if total >= 60.0 {
-        println!("\n=== Build Complete ({:.1}m) ===", total / 60.0);
-    } else {
-        println!("\n=== Build Complete ({:.1}s) ===", total);
-    }
-    println!(
-        "  ISO: {}",
-        output_dir.join(distro_spec::acorn::ISO_FILENAME).display()
-    );
-    println!("\nNext: acornos run");
-
-    Ok(())
-}
-
-fn cmd_build_kernel(clean: bool) -> Result<()> {
-    use distro_builder::timing::Timer;
-
-    let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let store = open_artifact_store(&base_dir);
-    let output_dir = distro_builder::artifact_store::central_output_dir_for_distro(&base_dir);
-
-    if clean {
-        let kernel_build = output_dir.join("kernel-build");
-        if kernel_build.exists() {
-            println!("Cleaning kernel build directory...");
-            std::fs::remove_dir_all(&kernel_build)?;
-        }
-    }
-
-    let needs_compile = clean || acornos::rebuild::kernel_needs_compile(&base_dir);
-    let needs_install = acornos::rebuild::kernel_needs_install(&base_dir);
-
-    if needs_compile || needs_install {
-        println!("Building kernel via recipe...");
-        let t = Timer::start("Kernel");
-        let linux = distro_builder::recipe::linux::linux(
-            &base_dir,
-            &distro_spec::acorn::KERNEL_SOURCE,
-            distro_spec::acorn::MODULE_INSTALL_PATH,
-        )?;
-        acornos::rebuild::cache_kernel_hash(&base_dir);
-        if let Some(store) = &store {
-            let key = output_dir.join(".kernel-inputs.hash");
-            let staging = output_dir.join("staging");
-            if let Err(e) = distro_builder::artifact_store::try_store_kernel_payload_from_key(
-                store,
-                &key,
-                &staging,
-                std::collections::BTreeMap::new(),
-            ) {
-                eprintln!(
-                    "[WARN] Failed to store kernel payload in artifact store: {:#}",
-                    e
-                );
-            }
-        }
-        t.finish();
-
-        println!("\n=== Kernel build complete ===");
-        println!("  Version: {}", linux.version);
-        println!(
-            "  Kernel:  {}",
-            output_dir.join("staging/boot/vmlinuz").display()
-        );
-    } else {
-        println!("[SKIP] Kernel already built and installed");
-        println!("  Use 'build kernel --clean' to force rebuild");
-    }
 
     Ok(())
 }
@@ -783,14 +532,6 @@ fn cmd_download_all() -> Result<()> {
     )?;
     println!("Alpine:  {} [OK]", alpine.iso.display());
 
-    // Linux kernel (via recipe)
-    let linux = distro_builder::recipe::linux::linux(
-        &base_dir,
-        &distro_spec::acorn::KERNEL_SOURCE,
-        distro_spec::acorn::MODULE_INSTALL_PATH,
-    )?;
-    println!("Linux:   {} [OK]", linux.source.display());
-
     // Installation tools
     distro_builder::recipe::install_tools(&base_dir)?;
 
@@ -814,31 +555,6 @@ fn cmd_download_alpine() -> Result<()> {
     println!("\nInstalling Tier 0-2 packages...");
     distro_builder::recipe::packages(&base_dir)?;
     println!("✓ Packages installed");
-
-    Ok(())
-}
-
-fn cmd_download_linux() -> Result<()> {
-    let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let source = &distro_spec::acorn::KERNEL_SOURCE;
-
-    println!(
-        "Linux kernel (AcornOS target: {} mainline):",
-        source.version
-    );
-
-    let linux = distro_builder::recipe::linux::linux(
-        &base_dir,
-        source,
-        distro_spec::acorn::MODULE_INSTALL_PATH,
-    )?;
-    println!("  Source:      {}", linux.source.display());
-
-    if linux.vmlinuz.exists() {
-        println!("  Installed:   {}", linux.vmlinuz.display());
-    } else {
-        println!("  Kernel:      NOT INSTALLED YET");
-    }
 
     Ok(())
 }
@@ -929,20 +645,8 @@ fn cmd_status() -> Result<()> {
         println!("  kconfig:         NOT FOUND");
     }
 
-    // Check if we can steal kernel from LevitateOS
-    let workspace_root = base_dir.parent().expect("AcornOS must be in workspace");
-    let leviso_dir = workspace_root.join("leviso");
-    let leviso_output_dir =
-        distro_builder::artifact_store::central_output_dir_for_distro(&leviso_dir);
-    let leviso_bzimage = leviso_output_dir.join("kernel-build/arch/x86/boot/bzImage");
-    if leviso_bzimage.exists() {
-        println!("  LevitateOS:      KERNEL AVAILABLE (can steal instead of building)");
-    }
-    println!();
-
     // Check build artifacts
     let kernel = output_dir.join("staging/boot/vmlinuz");
-    let kernel_build = output_dir.join("kernel-build");
     let rootfs = output_dir.join("filesystem.erofs");
     let initramfs = output_dir.join("initramfs-live.cpio.gz");
     let iso = output_dir.join(distro_spec::acorn::ISO_FILENAME);
@@ -983,26 +687,20 @@ fn cmd_status() -> Result<()> {
             .as_deref()
             .map(|r| r.contains(expected_suffix))
             .unwrap_or(false);
-        let stolen = kernel_build.is_symlink()
-            || kernel_release
-                .as_deref()
-                .map(|r| r.contains("-levitate"))
-                .unwrap_or(false);
 
         let release_suffix = kernel_release
             .as_deref()
             .map(|r| format!(" ({})", r))
             .unwrap_or_default();
 
-        if stolen {
-            println!(
-                "  Kernel:          STOLEN from LevitateOS ({} MB){}",
-                size, release_suffix
-            );
-        } else if built_for_distro {
-            println!("  Kernel:          BUILT ({} MB){}", size, release_suffix);
+        if built_for_distro {
+            println!("  Kernel:          PRESENT ({} MB){}", size, release_suffix);
         } else {
             println!("  Kernel:          PRESENT ({} MB){}", size, release_suffix);
+            println!(
+                "                  WARNING: expected suffix '{}' (build via: cargo xtask kernels build acorn)",
+                expected_suffix
+            );
         }
     } else {
         println!("  Kernel:          NOT BUILT");
@@ -1037,7 +735,7 @@ fn cmd_status() -> Result<()> {
     if !paths.rootfs.exists() {
         println!("  1. Run 'acornos download alpine' to download and create rootfs");
     } else if !kernel.exists() {
-        println!("  1. Run 'acornos build kernel' to build the kernel");
+        println!("  1. Run 'cargo xtask kernels build acorn' to build the kernel");
     } else if !rootfs.exists() {
         println!("  1. Run 'acornos build rootfs' to create filesystem.erofs");
     } else if !initramfs.exists() {
