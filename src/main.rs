@@ -219,7 +219,11 @@ fn resolve_kernel(base_dir: &std::path::Path) -> Result<()> {
 
     // Run the recipe — it handles theft from leviso internally
     println!("Resolving kernel via recipe...");
-    let linux = distro_builder::recipe::linux::linux(base_dir, &distro_spec::acorn::KERNEL_SOURCE)?;
+    let linux = distro_builder::recipe::linux::linux(
+        base_dir,
+        &distro_spec::acorn::KERNEL_SOURCE,
+        distro_spec::acorn::MODULE_INSTALL_PATH,
+    )?;
 
     if !linux.vmlinuz.exists() {
         anyhow::bail!(
@@ -397,7 +401,11 @@ fn cmd_build_with_kernel() -> Result<()> {
     if needs_compile {
         println!("Building kernel from source (~1 hour)...");
         let t = Timer::start("Kernel");
-        distro_builder::recipe::linux::linux(&base_dir, &distro_spec::acorn::KERNEL_SOURCE)?;
+        distro_builder::recipe::linux::linux(
+            &base_dir,
+            &distro_spec::acorn::KERNEL_SOURCE,
+            distro_spec::acorn::MODULE_INSTALL_PATH,
+        )?;
         acornos::rebuild::cache_kernel_hash(&base_dir);
         if let Some(store) = &store {
             let key = output_dir.join(".kernel-inputs.hash");
@@ -514,8 +522,11 @@ fn cmd_build_kernel(clean: bool) -> Result<()> {
     if needs_compile || needs_install {
         println!("Building kernel via recipe...");
         let t = Timer::start("Kernel");
-        let linux =
-            distro_builder::recipe::linux::linux(&base_dir, &distro_spec::acorn::KERNEL_SOURCE)?;
+        let linux = distro_builder::recipe::linux::linux(
+            &base_dir,
+            &distro_spec::acorn::KERNEL_SOURCE,
+            distro_spec::acorn::MODULE_INSTALL_PATH,
+        )?;
         acornos::rebuild::cache_kernel_hash(&base_dir);
         if let Some(store) = &store {
             let key = output_dir.join(".kernel-inputs.hash");
@@ -773,8 +784,11 @@ fn cmd_download_all() -> Result<()> {
     println!("Alpine:  {} [OK]", alpine.iso.display());
 
     // Linux kernel (via recipe)
-    let linux =
-        distro_builder::recipe::linux::linux(&base_dir, &distro_spec::acorn::KERNEL_SOURCE)?;
+    let linux = distro_builder::recipe::linux::linux(
+        &base_dir,
+        &distro_spec::acorn::KERNEL_SOURCE,
+        distro_spec::acorn::MODULE_INSTALL_PATH,
+    )?;
     println!("Linux:   {} [OK]", linux.source.display());
 
     // Installation tools
@@ -813,7 +827,11 @@ fn cmd_download_linux() -> Result<()> {
         source.version
     );
 
-    let linux = distro_builder::recipe::linux::linux(&base_dir, source)?;
+    let linux = distro_builder::recipe::linux::linux(
+        &base_dir,
+        source,
+        distro_spec::acorn::MODULE_INSTALL_PATH,
+    )?;
     println!("  Source:      {}", linux.source.display());
 
     if linux.vmlinuz.exists() {
