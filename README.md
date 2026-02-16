@@ -8,7 +8,7 @@ New conformance-driven work must move to:
 - `distro-variants/acorn`
 
 Reason:
-- We need tighter CP0+ conformance enforcement in one place.
+- We need tighter Stage 00+ conformance enforcement in one place.
 - Legacy per-OS crate drift can hide inconsistencies.
 - Shared invariants should live in `distro-builder`; variant-specific declarations should live in `distro-variants/*`.
 
@@ -102,7 +102,7 @@ Key areas:
 1. **Package tiers**: tune `distro-spec/src/acorn/packages.rs` (daily-driver defaults)
 2. **Services**: OpenRC enablement and defaults in `distro-spec/src/acorn/services.rs`
 3. **Profiles/overlays**: live behavior in `AcornOS/profile/`
-4. **Boot/testing**: keep QEMU smoke tests and `testing/install-tests/` checkpoints green
+4. **Boot/testing**: keep QEMU smoke tests and `testing/install-tests/` stages green
 
 ## License
 
