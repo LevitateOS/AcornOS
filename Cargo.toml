@@ -2,7 +2,7 @@
 name = "acornos"
 version = "0.1.0"
 edition = "2021"
-description = "AcornOS ISO builder - Alpine Linux + OpenRC + musl + busybox"
+description = "DEPRECATED: legacy AcornOS crate; active variant work moves to distro-variants/acorn"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/LevitateOS/AcornOS"
 keywords = ["linux", "alpine", "openrc", "musl", "iso"]

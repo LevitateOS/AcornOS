@@ -1,5 +1,10 @@
 //! AcornOS ISO Builder CLI
 //!
+//! # Deprecation Notice
+//!
+//! This CLI is deprecated as the primary AcornOS entrypoint.
+//! New conformance-driven work belongs in `distro-variants/acorn`.
+//!
 //! Builds AcornOS: a daily driver Linux distribution using musl, busybox, and OpenRC.
 //! Packages are sourced from Alpine Linux repositories (APKs).
 //!

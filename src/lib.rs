@@ -1,5 +1,10 @@
 //! AcornOS ISO builder library.
 //!
+//! # Deprecation Notice
+//!
+//! This crate is deprecated as the primary AcornOS entrypoint.
+//! New conformance-driven work belongs in `distro-variants/acorn`.
+//!
 //! AcornOS is a sibling distribution to LevitateOS, built on:
 //! - **Alpine Linux** packages (APKs)
 //! - **OpenRC** init system
