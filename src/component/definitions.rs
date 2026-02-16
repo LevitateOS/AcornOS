@@ -12,7 +12,7 @@
 //! - FIRMWARE: WiFi and hardware firmware
 //! - FINAL: Welcome message, live overlay, installer tools
 
-use distro_contract::component::Phase;
+use distro_builder::component::Phase;
 
 use super::{
     bin, copy_file, copy_tree, custom, dir, dir_mode, dirs, group, openrc_conf, openrc_enable,

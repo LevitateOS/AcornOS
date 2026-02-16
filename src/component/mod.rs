@@ -38,7 +38,7 @@ pub use definitions::*;
 pub use distro_builder::alpine::context::BuildContext;
 
 // Re-export from distro-builder for convenience
-pub use distro_contract::component::{Installable, Phase};
+pub use distro_builder::component::{Installable, Phase};
 
 /// A system component that can be installed.
 ///
@@ -63,7 +63,7 @@ impl Installable for Component {
         self.phase
     }
 
-    fn ops(&self) -> Vec<distro_contract::component::Op> {
+    fn ops(&self) -> Vec<distro_builder::component::Op> {
         // Convert our static ops to distro_builder ops for the trait
         // Note: We handle our own ops in our executor
         vec![]
@@ -79,7 +79,7 @@ impl Installable for &Component {
         self.phase
     }
 
-    fn ops(&self) -> Vec<distro_contract::component::Op> {
+    fn ops(&self) -> Vec<distro_builder::component::Op> {
         vec![]
     }
 }

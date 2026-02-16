@@ -11,7 +11,6 @@ categories = ["command-line-utilities", "development-tools::build-utils"]
 [dependencies]
 anyhow = "1.0"
 clap = { version = "4", features = ["derive"] }
-distro-contract = { path = "../distro-contract" }
 distro-spec = { path = "../distro-spec" }
 distro-builder = { path = "../distro-builder" }
 recinit = { path = "../tools/recinit" }

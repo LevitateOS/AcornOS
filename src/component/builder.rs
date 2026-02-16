@@ -7,7 +7,7 @@ use anyhow::Result;
 use std::fs;
 
 use distro_builder::LicenseTracker;
-use distro_contract::PackageManager;
+use distro_builder::PackageManager;
 
 use super::definitions::ALL_COMPONENTS;
 use super::executor;

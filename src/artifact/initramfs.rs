@@ -35,7 +35,7 @@ pub fn build_tiny_initramfs(base_dir: &Path) -> Result<()> {
     let busybox_path = download_and_cache_busybox(&downloads_dir)?;
 
     // Find kernel modules directory
-    let modules_base = output_dir.join("staging/lib/modules");
+    let modules_base = output_dir.join("staging/usr/lib/modules");
     let modules_dir = find_kernel_modules_dir(&modules_base)?;
 
     let output_path = output_dir.join(INITRAMFS_LIVE_OUTPUT);

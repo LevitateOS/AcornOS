@@ -182,6 +182,11 @@ fn resolve_kernel(base_dir: &std::path::Path) -> Result<()> {
     )
 }
 
+fn require_conformance_contract() -> Result<()> {
+    distro_spec::conformance::require_valid_contract_for_distro("acorn")
+        .map_err(|e| anyhow::anyhow!(e))
+}
+
 fn cmd_build() -> Result<()> {
     use distro_builder::timing::Timer;
     use std::time::Instant;
@@ -190,6 +195,8 @@ fn cmd_build() -> Result<()> {
     let store = open_artifact_store(&base_dir);
     let output_dir = distro_builder::artifact_store::central_output_dir_for_distro(&base_dir);
     let build_start = Instant::now();
+
+    require_conformance_contract()?;
 
     println!("=== Full AcornOS Build ===\n");
 
@@ -313,6 +320,8 @@ fn cmd_build_rootfs() -> Result<()> {
     let store = open_artifact_store(&base_dir);
     let output_dir = distro_builder::artifact_store::central_output_dir_for_distro(&base_dir);
 
+    require_conformance_contract()?;
+
     if let Some(store) = &store {
         let key = output_dir.join(".rootfs-inputs.hash");
         let out = output_dir.join(distro_spec::acorn::ROOTFS_NAME);
@@ -361,6 +370,8 @@ fn cmd_initramfs() -> Result<()> {
     let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let store = open_artifact_store(&base_dir);
     let output_dir = distro_builder::artifact_store::central_output_dir_for_distro(&base_dir);
+
+    require_conformance_contract()?;
 
     if let Some(store) = &store {
         let key = output_dir.join(".initramfs-inputs.hash");
@@ -415,6 +426,8 @@ fn cmd_iso() -> Result<()> {
     let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let store = open_artifact_store(&base_dir);
     let output_dir = distro_builder::artifact_store::central_output_dir_for_distro(&base_dir);
+
+    require_conformance_contract()?;
 
     // Ensure dependencies exist first
     let rootfs = output_dir.join(distro_spec::acorn::ROOTFS_NAME);
@@ -588,7 +601,7 @@ fn cmd_download_tools() -> Result<()> {
 fn cmd_status() -> Result<()> {
     use acornos::config::AcornConfig;
     use distro_builder::alpine::extract::ExtractPaths;
-    use distro_contract::DistroConfig;
+    use distro_builder::DistroConfig;
 
     let config = AcornConfig;
     let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
