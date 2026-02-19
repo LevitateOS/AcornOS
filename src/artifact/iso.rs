@@ -154,6 +154,7 @@ fn create_live_overlay(output_dir: &Path) -> Result<()> {
         } else {
             None
         },
+        issue_message: None,
     };
 
     create_openrc_live_overlay(output_dir, &config)?;

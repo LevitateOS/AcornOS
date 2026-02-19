@@ -53,17 +53,17 @@
 let build_deps = ["7z-deps"];
 
 let ctx = #{
-    apk_static_path: "/home/vince/LevitateOS/AcornOS/downloads/apk-tools/sbin/apk.static",
+    apk_static_path: "/tmp/levitate-legacy-stubs/acorn/deps/apk-tools/sbin/apk.static",
     apk_tools_name: "apk-tools-static-3.0.4-r0.apk",
     apk_tools_sha256: "a6820637fdcbd2e700f5ced9569d0866b28fa999cb0792a6ab19ea66cf18209a",
     apk_tools_url: "https://dl-cdn.alpinelinux.org/alpine/v3.23/main/x86_64/apk-tools-static-3.0.4-r0.apk",
     description: "Alpine Linux rootfs (extracted from Extended ISO)",
     disk_buffer: 536870912,
     iso_name: "alpine-extended-3.23.2-x86_64.iso",
-    iso_path: "/home/vince/LevitateOS/AcornOS/downloads/alpine-extended-3.23.2-x86_64.iso",
+    iso_path: "/tmp/levitate-legacy-stubs/acorn/deps/alpine-extended-3.23.2-x86_64.iso",
     iso_url: "https://dl-cdn.alpinelinux.org/alpine/v3.23/releases/x86_64/alpine-extended-3.23.2-x86_64.iso",
     name: "alpine",
-    rootfs_path: "/home/vince/LevitateOS/AcornOS/deps/../downloads/rootfs",
+    rootfs_path: "/tmp/levitate-legacy-stubs/acorn/rootfs",
     sha256: "8d50854936dba58e7616ac3bfa07ad67dac0347305fec1cba6d288cf5df1577d",
     sha256_url: "https://dl-cdn.alpinelinux.org/alpine/v3.23/releases/x86_64/alpine-extended-3.23.2-x86_64.iso.sha256",
     size_bytes: 1413529600,

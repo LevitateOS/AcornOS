@@ -121,14 +121,16 @@ enum BuildArtifact {
 }
 
 fn main() {
-    eprintln!(
-        "Deprecated entrypoint blocked: 'acornos'.\n\
-         Use the new Stage 00 endpoint instead:\n\
-           just build acorn\n\
-         or:\n\
-           cargo run -p distro-builder --bin distro-builder -- iso build acorn"
-    );
-    std::process::exit(2);
+    if std::env::var_os("ACORNOS_ALLOW_LEGACY_ENTRYPOINT").is_none() {
+        eprintln!(
+            "Deprecated entrypoint blocked: 'acornos'.\n\
+             Use the new Stage 00 endpoint instead:\n\
+               just build acorn\n\
+             or:\n\
+               cargo run -p distro-builder --bin distro-builder -- iso build acorn"
+        );
+        std::process::exit(2);
+    }
 
     let cli = Cli::parse();
 
